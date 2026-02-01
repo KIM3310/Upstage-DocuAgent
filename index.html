@@ -1,0 +1,1140 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DocuAgent — Upstage 문서 분석</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700&display=swap');
+:root {
+  --bg: #0b0c13;
+  --bg2: #121326;
+  --surface: rgba(18, 19, 33, 0.85);
+  --surface2: rgba(26, 27, 47, 0.9);
+  --surface3: rgba(32, 34, 60, 0.9);
+  --border: rgba(150, 140, 210, 0.22);
+  --text: #e9e6f7;
+  --text2: #a3a0b8;
+  --accent: #8b7aff;
+  --accent-strong: #6f5bff;
+  --accent2: #c1b5ff;
+  --glow: rgba(139, 122, 255, 0.35);
+  --green: #3dd6b3;
+  --orange: #f3b87a;
+  --red: #f08080;
+  --shadow: 0 14px 30px rgba(7, 8, 18, 0.5);
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  font-family:'Pretendard','Apple SD Gothic Neo','Noto Sans KR',sans-serif;
+  background:
+    radial-gradient(1200px 600px at 10% -10%, rgba(139, 122, 255, 0.18), transparent 60%),
+    radial-gradient(900px 520px at 95% 0%, rgba(243, 184, 122, 0.08), transparent 55%),
+    linear-gradient(160deg, var(--bg) 0%, #0d0f1f 60%, var(--bg2) 100%);
+  color:var(--text);
+  min-height:100vh;
+  position:relative;
+  overflow-x:hidden;
+  background-attachment:fixed;
+}
+body::before,
+body::after {
+  content:'';
+  position:fixed;
+  pointer-events:none;
+  z-index:0;
+  filter:blur(28px);
+}
+body::before {
+  top:-15%;
+  left:-10%;
+  width:58vmax;
+  height:58vmax;
+  background:radial-gradient(circle, rgba(139, 122, 255, 0.18), transparent 60%);
+  opacity:0.8;
+}
+body::after {
+  bottom:-20%;
+  right:-10%;
+  width:62vmax;
+  height:62vmax;
+  background:radial-gradient(circle, rgba(193, 181, 255, 0.15), transparent 60%);
+  opacity:0.7;
+}
+::selection { background:rgba(139, 122, 255, 0.35); color:#fff; }
+
+.header {
+  padding:20px 32px;
+  border-bottom:1px solid var(--border);
+  display:flex; align-items:center; gap:16px;
+  background:rgba(14, 15, 28, 0.75);
+  backdrop-filter:blur(10px);
+  box-shadow:0 8px 20px rgba(7, 8, 18, 0.35);
+  position:relative;
+  z-index:2;
+}
+.brand {
+  display:flex; align-items:center; gap:12px;
+}
+.brand-logo {
+  height:28px; width:auto; max-width:120px;
+  object-fit:contain;
+  filter:drop-shadow(0 4px 8px rgba(0,0,0,0.25));
+}
+.brand-text {
+  display:flex; flex-direction:column; line-height:1.2;
+}
+.brand-sub {
+  font-size:12px; color:var(--text);
+  font-weight:600;
+}
+.header h1 {
+  font-size:20px;
+  font-weight:700;
+  letter-spacing:0.2px;
+  font-family:'Sora','Pretendard',sans-serif;
+}
+.header h1 span {
+  background:linear-gradient(135deg, #cbbfff 0%, #8b7aff 45%, #f2c08a 100%);
+  -webkit-background-clip:text;
+  background-clip:text;
+  color:transparent;
+}
+.header .tag {
+  font-size:11px; padding:3px 10px; border-radius:12px;
+  background:linear-gradient(135deg, var(--accent-strong), var(--accent2));
+  color:#fff; font-weight:600;
+  border:1px solid rgba(255,255,255,0.12);
+  box-shadow:0 6px 16px rgba(111, 91, 255, 0.35);
+}
+.header .powered {
+  margin-left:auto; font-size:12px; color:var(--text2);
+  font-family:'Sora','Pretendard',sans-serif;
+  letter-spacing:0.15px;
+}
+
+.container { display:flex; height:calc(100vh - 65px); position:relative; z-index:1; }
+
+/* Left panel */
+.left {
+  width:50%;
+  border-right:1px solid var(--border);
+  display:flex; flex-direction:column;
+  background:linear-gradient(180deg, rgba(18, 19, 33, 0.7), rgba(12, 13, 24, 0.9));
+}
+
+.upload-zone {
+  padding:24px; border-bottom:1px solid var(--border);
+  background:linear-gradient(180deg, rgba(23, 24, 42, 0.9), rgba(15, 16, 30, 0.9));
+}
+.drop-area {
+  border:1.5px dashed rgba(169, 156, 255, 0.35); border-radius:12px;
+  padding:40px 20px; text-align:center; cursor:pointer;
+  transition:all 0.2s;
+  background:linear-gradient(135deg, rgba(139, 122, 255, 0.08), rgba(17, 18, 33, 0.45));
+  box-shadow:inset 0 0 0 1px rgba(139, 122, 255, 0.08);
+}
+.drop-area:hover {
+  border-color:var(--accent);
+  background:linear-gradient(135deg, rgba(139, 122, 255, 0.16), rgba(17, 18, 33, 0.55));
+  box-shadow:0 0 0 3px rgba(139, 122, 255, 0.12);
+  transform:translateY(-1px);
+}
+.drop-area.dragover {
+  border-color:var(--accent);
+  background:linear-gradient(135deg, rgba(139, 122, 255, 0.22), rgba(17, 18, 33, 0.6));
+  box-shadow:0 0 0 4px rgba(139, 122, 255, 0.2);
+}
+.drop-area .icon { font-size:36px; margin-bottom:8px; }
+.drop-area p { color:var(--text2); font-size:14px; }
+.drop-area .formats { font-size:11px; color:var(--text2); margin-top:6px; opacity:0.7; }
+
+.file-input { display:none; }
+
+.edu-controls {
+  margin-top:14px; display:flex; gap:12px; flex-wrap:wrap;
+}
+.control {
+  display:flex; flex-direction:column; gap:6px;
+  font-size:12px; color:var(--text2); min-width:160px;
+}
+.control select {
+  padding:10px 12px; border-radius:10px;
+  border:1px solid var(--border); background:var(--surface);
+  color:var(--text); font-size:13px; outline:none;
+}
+.control select:focus { border-color:var(--accent); box-shadow:0 0 0 3px var(--glow); }
+.control input {
+  padding:10px 12px; border-radius:10px;
+  border:1px solid var(--border); background:var(--surface);
+  color:var(--text); font-size:13px; outline:none;
+}
+.control input:focus { border-color:var(--accent); box-shadow:0 0 0 3px var(--glow); }
+.tag-suggestions {
+  margin-top:6px; display:flex; gap:6px; flex-wrap:wrap; align-items:center;
+}
+.tag-label { font-size:11px; color:var(--text2); }
+.tag-suggestions #tagSuggestions {
+  display:flex; gap:6px; flex-wrap:wrap;
+}
+.tag-chip {
+  border:1px solid var(--border);
+  background:var(--surface2);
+  color:var(--text);
+  padding:4px 8px;
+  border-radius:999px;
+  font-size:11px;
+  cursor:pointer;
+  transition:all 0.2s;
+}
+.tag-chip:hover { border-color:var(--accent2); transform:translateY(-1px); }
+.tag-chip.active {
+  background:linear-gradient(135deg, var(--accent-strong), var(--accent2));
+  color:#fff;
+  border-color:transparent;
+}
+
+.results { flex:1; overflow-y:auto; padding:20px 24px; }
+
+.result-card {
+  background:linear-gradient(160deg, rgba(26, 27, 47, 0.9), rgba(18, 19, 33, 0.95));
+  border:1px solid var(--border);
+  border-radius:10px; padding:16px; margin-bottom:14px;
+  box-shadow:var(--shadow);
+  animation:rise 0.4s ease both;
+  backdrop-filter:blur(6px);
+}
+.result-card .card-title {
+  font-size:12px; font-weight:600; color:var(--accent2);
+  text-transform:uppercase; letter-spacing:1px; margin-bottom:10px;
+  display:flex; align-items:center; gap:8px;
+}
+.result-card .card-title .step {
+  background:var(--accent-strong); color:#fff; font-size:10px;
+  padding:2px 7px; border-radius:8px; font-weight:700;
+  box-shadow:0 4px 10px rgba(111, 91, 255, 0.35);
+}
+
+.parsed-content {
+  font-size:13px; line-height:1.7; color:var(--text);
+  white-space:pre-wrap; max-height:250px; overflow-y:auto;
+  background:var(--surface2); padding:12px; border-radius:8px;
+  font-family:'JetBrains Mono',monospace;
+  border:1px solid rgba(139, 122, 255, 0.12);
+}
+
+.extracted-grid {
+  display:grid; gap:8px;
+}
+.extracted-item {
+  display:flex; gap:8px; font-size:13px;
+  padding:8px 12px; background:var(--surface2); border-radius:8px;
+  border:1px solid rgba(139, 122, 255, 0.1);
+}
+.extracted-item .key {
+  color:var(--accent2); font-weight:600; min-width:120px; flex-shrink:0;
+}
+.extracted-item .val { color:var(--text); }
+
+.summary-text {
+  font-size:14px; line-height:1.8; color:var(--text);
+  padding:12px; background:var(--surface2); border-radius:8px;
+  border:1px solid rgba(139, 122, 255, 0.12);
+}
+
+.edu-pack { display:grid; gap:12px; }
+.edu-section {
+  padding:12px; border-radius:8px;
+  background:var(--surface2);
+  border:1px solid rgba(139, 122, 255, 0.12);
+}
+.edu-label {
+  font-size:12px; font-weight:600; color:var(--accent2);
+  letter-spacing:0.3px; margin-bottom:8px;
+}
+.edu-list {
+  margin:0; padding-left:18px;
+  font-size:13px; line-height:1.7; color:var(--text);
+}
+.edu-text { font-size:13px; line-height:1.7; color:var(--text); white-space:pre-wrap; }
+.edu-qa { display:flex; flex-direction:column; gap:8px; font-size:13px; }
+.edu-qa .qa-item {
+  background:var(--surface3); border:1px solid rgba(139, 122, 255, 0.12);
+  border-radius:8px; padding:8px 10px;
+}
+.edu-qa .qa-q { color:var(--accent2); font-weight:600; margin-bottom:4px; }
+.edu-qa .qa-a { color:var(--text); }
+
+.export-actions {
+  display:flex; gap:10px; flex-wrap:wrap;
+}
+.export-btn {
+  padding:10px 14px; border-radius:10px; border:1px solid var(--border);
+  background:var(--surface2); color:var(--text);
+  font-size:13px; font-weight:600; cursor:pointer;
+  transition:all 0.2s;
+}
+.export-btn:hover { transform:translateY(-1px); border-color:var(--accent2); }
+.export-btn:disabled { opacity:0.45; cursor:not-allowed; transform:none; }
+.export-hint { margin-top:8px; font-size:12px; color:var(--text2); }
+
+/* Right panel - Chat */
+.right {
+  width:50%;
+  display:flex; flex-direction:column;
+  background:linear-gradient(180deg, rgba(16, 17, 30, 0.6), rgba(12, 12, 24, 0.9));
+}
+
+.chat-header {
+  padding:16px 24px; border-bottom:1px solid var(--border);
+  font-size:14px; font-weight:600; color:var(--text2);
+  background:rgba(16, 17, 30, 0.7);
+  letter-spacing:0.2px;
+  font-family:'Sora','Pretendard',sans-serif;
+}
+
+.chat-messages {
+  flex:1; overflow-y:auto; padding:20px 24px;
+  display:flex; flex-direction:column; gap:12px;
+}
+
+.msg {
+  max-width:85%; padding:12px 16px; border-radius:14px;
+  font-size:14px; line-height:1.7;
+  animation:rise 0.35s ease both;
+}
+.msg.agent {
+  align-self:flex-start; background:var(--surface);
+  border:1px solid var(--border); border-bottom-left-radius:4px;
+  box-shadow:0 8px 18px rgba(10, 11, 22, 0.45);
+}
+.msg.user {
+  align-self:flex-end;
+  background:linear-gradient(135deg, var(--accent-strong), #9a8bff);
+  color:#fff; border-bottom-right-radius:4px;
+  box-shadow:0 10px 20px rgba(111, 91, 255, 0.35);
+}
+.msg .sender {
+  font-size:11px; font-weight:600; margin-bottom:4px; opacity:0.7;
+}
+
+.chat-input-area {
+  padding:16px 24px; border-top:1px solid var(--border);
+  display:flex; gap:10px;
+  background:rgba(14, 15, 28, 0.75);
+  backdrop-filter:blur(8px);
+}
+.chat-input-area input {
+  flex:1; padding:12px 16px; border-radius:10px;
+  border:1px solid var(--border); background:var(--surface);
+  color:var(--text); font-size:14px; outline:none;
+}
+.chat-input-area input:focus { border-color:var(--accent); box-shadow:0 0 0 3px var(--glow); }
+.chat-input-area input::placeholder { color:var(--text2); }
+.chat-input-area button {
+  padding:12px 20px; border-radius:10px; border:none;
+  background:linear-gradient(135deg, var(--accent-strong), var(--accent2));
+  color:#fff; font-size:14px;
+  font-weight:600; cursor:pointer; transition:all 0.2s;
+  box-shadow:0 10px 20px rgba(111, 91, 255, 0.35);
+}
+.chat-input-area button:hover { transform:translateY(-1px); filter:brightness(1.05); }
+.chat-input-area button:disabled { opacity:0.4; cursor:not-allowed; }
+
+/* Loading */
+.loader {
+  display:none; padding:24px; text-align:center;
+}
+.loader.active { display:block; }
+.loader .spinner {
+  width:36px; height:36px; border:3px solid var(--border);
+  border-top-color:var(--accent); border-radius:50%;
+  animation:spin 0.8s linear infinite; margin:0 auto 12px;
+}
+@keyframes spin { to { transform:rotate(360deg); } }
+.loader .steps {
+  font-size:13px; color:var(--text2); line-height:2;
+}
+.loader .steps .done { color:var(--green); }
+.loader .steps .active-step { color:var(--accent2); font-weight:600; }
+
+.empty-state {
+  flex:1; display:flex; align-items:center; justify-content:center;
+  color:var(--text2); font-size:14px; text-align:center; padding:40px;
+  line-height:1.8;
+  margin:16px;
+  border-radius:16px;
+  border:1px dashed rgba(193, 181, 255, 0.2);
+  background:linear-gradient(160deg, rgba(26, 27, 47, 0.5), rgba(16, 17, 30, 0.4));
+}
+
+/* Pipeline badge */
+.pipeline {
+  display:flex; gap:4px; align-items:center; padding:12px 24px;
+  border-bottom:1px solid var(--border); font-size:11px;
+  background:rgba(14, 15, 28, 0.7);
+}
+.pipeline .pipe-step {
+  padding:4px 10px; border-radius:6px; background:var(--surface2);
+  color:var(--text2); font-weight:500;
+}
+.pipeline .pipe-step.active {
+  background:linear-gradient(135deg, var(--accent-strong), var(--accent2));
+  color:#fff;
+  box-shadow:0 6px 14px rgba(111, 91, 255, 0.35);
+}
+.pipeline .arrow { color:var(--text2); }
+@keyframes rise {
+  from { opacity:0; transform:translateY(6px); }
+  to { opacity:1; transform:translateY(0); }
+}
+
+@media (max-width: 980px) {
+  .header { flex-wrap:wrap; }
+  .header .powered { margin-left:0; width:100%; }
+  .pipeline { flex-wrap:wrap; row-gap:6px; }
+  .container { flex-direction:column; height:auto; min-height:calc(100vh - 65px); }
+  .left, .right { width:100%; }
+  .left { border-right:none; border-bottom:1px solid var(--border); }
+  .upload-zone { padding:20px; }
+  .drop-area { padding:28px 16px; }
+  .chat-messages { max-height:60vh; }
+}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="brand">
+    <img class="brand-logo" src="assets/upstage-logo.svg" alt="Upstage logo">
+    <div class="brand-text">
+      <div class="brand-sub">업스테이지 엠버서더 · 도큐 에이전트</div>
+    </div>
+  </div>
+  <h1>Docu<span>Agent</span></h1>
+  <div class="tag">문서 분석</div>
+  <div class="powered">Upstage Solar · Document Parse · Information Extract</div>
+</div>
+
+<div class="pipeline">
+  <div class="pipe-step" id="ps1">Document Parse</div>
+  <div class="arrow">→</div>
+  <div class="pipe-step" id="ps2">Information Extract</div>
+  <div class="arrow">→</div>
+  <div class="pipe-step" id="ps3">Solar 처리</div>
+  <div class="arrow">→</div>
+  <div class="pipe-step" id="ps4">교육 콘텐츠</div>
+</div>
+
+<div class="container">
+  <!-- Left: Upload & Results -->
+  <div class="left">
+    <div class="upload-zone">
+      <div class="drop-area" id="dropArea">
+        <p>문서를 드래그하거나 클릭하여 업로드</p>
+        <div class="formats">PDF, PNG, JPG, TIFF 지원</div>
+      </div>
+      <input type="file" class="file-input" id="fileInput" accept=".pdf,.png,.jpg,.jpeg,.tiff">
+      <div class="edu-controls">
+        <div class="control">
+          <label for="audienceSelect">학습자 수준</label>
+          <select id="audienceSelect">
+            <option value="중/고등학생">중/고등학생</option>
+            <option value="대학생" selected>대학생</option>
+            <option value="직무/실무">직무/실무</option>
+            <option value="일반">일반</option>
+          </select>
+        </div>
+        <div class="control">
+          <label for="goalSelect">학습 목표</label>
+          <select id="goalSelect">
+            <option value="핵심 이해" selected>핵심 이해</option>
+            <option value="시험 대비">시험 대비</option>
+            <option value="강의/발표">강의/발표</option>
+            <option value="프로젝트/업무 적용">프로젝트/업무 적용</option>
+          </select>
+        </div>
+        <div class="control" style="min-width:220px;">
+          <label for="tagInput">LOM 태그 (쉼표 구분)</label>
+          <input type="text" id="tagInput" placeholder="예: 계약서, 개인정보, 리스크">
+          <div class="tag-suggestions">
+            <span class="tag-label">추천:</span>
+            <div id="tagSuggestions"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="loader" id="loader">
+      <div class="spinner"></div>
+    <div class="steps">
+      <div id="step1">Document Parse — 문서 구조 분석 중...</div>
+      <div id="step2">Information Extract — 핵심 정보 추출 중...</div>
+      <div id="step3">Solar 처리 — 분석 요약 생성 중...</div>
+      <div id="step4">교육 콘텐츠 — 학습 자료 생성 중...</div>
+    </div>
+  </div>
+
+    <div class="results" id="results" style="display:none;">
+      <!-- 파싱 결과 -->
+      <div class="result-card">
+        <div class="card-title"><span class="step">1</span>Document Parse 결과</div>
+        <div class="parsed-content" id="parsedContent"></div>
+      </div>
+
+      <!-- 추출 결과 -->
+      <div class="result-card">
+        <div class="card-title"><span class="step">2</span>Information Extract 결과</div>
+        <div class="extracted-grid" id="extractedGrid"></div>
+      </div>
+
+      <!-- 요약 -->
+      <div class="result-card">
+        <div class="card-title"><span class="step">3</span>Solar 분석 요약</div>
+        <div class="summary-text" id="summaryText"></div>
+      </div>
+
+      <!-- 교육 콘텐츠 -->
+      <div class="result-card">
+        <div class="card-title"><span class="step">4</span>교육 콘텐츠 패키지</div>
+        <div class="edu-pack" id="eduPack">
+          <div class="edu-section">
+            <div class="edu-label">학습 목표</div>
+            <ul class="edu-list" id="eduObjectives"></ul>
+          </div>
+          <div class="edu-section">
+            <div class="edu-label">핵심 개념</div>
+            <ul class="edu-list" id="eduConcepts"></ul>
+          </div>
+          <div class="edu-section">
+            <div class="edu-label">교육용 요약</div>
+            <div class="edu-text" id="eduSummary"></div>
+          </div>
+          <div class="edu-section">
+            <div class="edu-label">퀴즈</div>
+            <div class="edu-qa" id="eduQuiz"></div>
+          </div>
+          <div class="edu-section">
+            <div class="edu-label">플래시카드</div>
+            <div class="edu-qa" id="eduCards"></div>
+          </div>
+          <div class="edu-section">
+            <div class="edu-label">활동/과제</div>
+            <ul class="edu-list" id="eduActivities"></ul>
+          </div>
+        </div>
+      </div>
+
+      <!-- Export -->
+      <div class="result-card">
+        <div class="card-title"><span class="step">5</span>결과 내보내기</div>
+        <div class="export-actions">
+          <button class="export-btn" id="exportMarkdown" disabled>Notion용 Markdown</button>
+          <button class="export-btn" id="exportHtml" disabled>LMS용 HTML</button>
+          <button class="export-btn" id="exportPdf" disabled>PDF 저장</button>
+          <button class="export-btn" id="exportScorm" disabled>SCORM 1.2</button>
+          <button class="export-btn" id="exportIms" disabled>IMS CC 1.1</button>
+          <button class="export-btn" id="exportScorm2004" disabled>SCORM 2004</button>
+          <button class="export-btn" id="exportIms13" disabled>IMS CC 1.3</button>
+        </div>
+        <div class="export-hint">PDF는 새 창에서 인쇄 기능으로 저장됩니다. SCORM 1.2/2004, IMS CC 1.1/1.3은 ZIP으로 다운로드됩니다.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Right: Chat -->
+  <div class="right">
+    <div class="chat-header">문서 질의응답</div>
+
+    <div class="chat-messages" id="chatMessages">
+      <div class="empty-state" id="emptyChat">
+        문서를 업로드하면<br>질문을 보낼 수 있습니다
+      </div>
+    </div>
+
+    <div class="chat-input-area">
+      <input type="text" id="chatInput" placeholder="문서에 대해 질문하세요..." disabled>
+      <button id="sendBtn" disabled>전송</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const dropArea = document.getElementById('dropArea');
+const fileInput = document.getElementById('fileInput');
+const loader = document.getElementById('loader');
+const results = document.getElementById('results');
+const chatMessages = document.getElementById('chatMessages');
+const chatInput = document.getElementById('chatInput');
+const sendBtn = document.getElementById('sendBtn');
+const emptyChat = document.getElementById('emptyChat');
+const audienceSelect = document.getElementById('audienceSelect');
+const goalSelect = document.getElementById('goalSelect');
+const tagInput = document.getElementById('tagInput');
+const tagSuggestions = document.getElementById('tagSuggestions');
+const exportMarkdown = document.getElementById('exportMarkdown');
+const exportHtml = document.getElementById('exportHtml');
+const exportPdf = document.getElementById('exportPdf');
+const exportScorm = document.getElementById('exportScorm');
+const exportIms = document.getElementById('exportIms');
+const exportScorm2004 = document.getElementById('exportScorm2004');
+const exportIms13 = document.getElementById('exportIms13');
+
+let progressTimers = [];
+let lastAnalysis = null;
+let tagSyncTimer = null;
+let currentRecommendations = [];
+function resetProgressTimers() {
+  progressTimers.forEach(clearTimeout);
+  progressTimers = [];
+}
+
+function setExportEnabled(enabled) {
+  exportMarkdown.disabled = !enabled;
+  exportHtml.disabled = !enabled;
+  exportPdf.disabled = !enabled;
+  exportScorm.disabled = !enabled;
+  exportIms.disabled = !enabled;
+  exportScorm2004.disabled = !enabled;
+  exportIms13.disabled = !enabled;
+}
+
+let docReady = false;
+
+// Drag & drop
+dropArea.addEventListener('click', () => fileInput.click());
+dropArea.addEventListener('dragover', e => { e.preventDefault(); dropArea.classList.add('dragover'); });
+dropArea.addEventListener('dragleave', () => dropArea.classList.remove('dragover'));
+dropArea.addEventListener('drop', e => {
+  e.preventDefault();
+  dropArea.classList.remove('dragover');
+  if(e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+});
+fileInput.addEventListener('change', e => { if(e.target.files.length) handleFile(e.target.files[0]); });
+
+async function handleFile(file) {
+  // Reset
+  resetProgressTimers();
+  lastAnalysis = null;
+  setExportEnabled(false);
+  docReady = false;
+  chatInput.disabled = true;
+  sendBtn.disabled = true;
+  emptyChat.style.display = 'flex';
+  tagInput.value = '';
+  currentRecommendations = [];
+  renderTagSuggestions([]);
+  results.style.display = 'none';
+  loader.classList.add('active');
+  document.getElementById('step1').className = 'active-step';
+  document.getElementById('step1').textContent = 'Document Parse — 문서 구조 분석 중...';
+  document.getElementById('step2').className = '';
+  document.getElementById('step2').textContent = 'Information Extract — 대기 중';
+  document.getElementById('step3').className = '';
+  document.getElementById('step3').textContent = 'Solar 처리 — 대기 중';
+  document.getElementById('step4').className = '';
+  document.getElementById('step4').textContent = '교육 콘텐츠 — 대기 중';
+
+  // Pipeline badges
+  document.getElementById('ps1').classList.add('active');
+  document.getElementById('ps2').classList.remove('active');
+  document.getElementById('ps3').classList.remove('active');
+  document.getElementById('ps4').classList.remove('active');
+
+  dropArea.innerHTML = `<p>${file.name} (${(file.size/1024).toFixed(1)}KB)</p>`;
+
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('audience', audienceSelect.value);
+  formData.append('goal', goalSelect.value);
+  formData.append('tags', tagInput.value);
+
+  // Simulate step progression
+  progressTimers.push(setTimeout(() => {
+    document.getElementById('step1').className = 'done';
+    document.getElementById('step1').textContent = 'Document Parse — 완료';
+    document.getElementById('step2').className = 'active-step';
+    document.getElementById('step2').textContent = 'Information Extract — 핵심 정보 추출 중...';
+    document.getElementById('ps1').classList.remove('active');
+    document.getElementById('ps2').classList.add('active');
+  }, 2500));
+
+  progressTimers.push(setTimeout(() => {
+    document.getElementById('step2').className = 'done';
+    document.getElementById('step2').textContent = 'Information Extract — 완료';
+    document.getElementById('step3').className = 'active-step';
+    document.getElementById('step3').textContent = 'Solar 처리 — 분석 요약 생성 중...';
+    document.getElementById('ps2').classList.remove('active');
+    document.getElementById('ps3').classList.add('active');
+  }, 5500));
+
+  progressTimers.push(setTimeout(() => {
+    document.getElementById('step3').className = 'done';
+    document.getElementById('step3').textContent = 'Solar 처리 — 완료';
+    document.getElementById('step4').className = 'active-step';
+    document.getElementById('step4').textContent = '교육 콘텐츠 — 학습 자료 생성 중...';
+    document.getElementById('ps3').classList.remove('active');
+    document.getElementById('ps4').classList.add('active');
+  }, 8000));
+
+  try {
+    const resp = await fetch('/api/analyze', { method:'POST', body:formData });
+    const data = await resp.json();
+
+    if(!resp.ok) throw new Error(data.detail || 'Analysis failed');
+
+    // Show results
+    resetProgressTimers();
+    loader.classList.remove('active');
+    results.style.display = 'block';
+    document.getElementById('step1').className = 'done';
+    document.getElementById('step1').textContent = 'Document Parse — 완료';
+    document.getElementById('step2').className = 'done';
+    document.getElementById('step2').textContent = 'Information Extract — 완료';
+    document.getElementById('step3').className = 'done';
+    document.getElementById('step3').textContent = 'Solar 처리 — 완료';
+    document.getElementById('step4').className = 'done';
+    document.getElementById('step4').textContent = '교육 콘텐츠 — 완료';
+    document.getElementById('ps1').classList.remove('active');
+    document.getElementById('ps2').classList.remove('active');
+    document.getElementById('ps3').classList.remove('active');
+    document.getElementById('ps4').classList.add('active');
+
+    // Parsed content
+    document.getElementById('parsedContent').textContent = data.parsed_markdown || '(empty)';
+
+    // Extracted data
+    const grid = document.getElementById('extractedGrid');
+    grid.innerHTML = '';
+    if(data.extracted_data && typeof data.extracted_data === 'object') {
+      for(const [k, v] of Object.entries(data.extracted_data)) {
+        if(k === 'raw') continue;
+        grid.innerHTML += `<div class="extracted-item"><div class="key">${k}</div><div class="val">${v || '-'}</div></div>`;
+      }
+    }
+
+    // Summary
+    document.getElementById('summaryText').textContent = data.summary;
+
+    // Education pack
+    const edu = data.edu_pack || {};
+    renderList('eduObjectives', edu.learning_objectives, '학습 목표가 없습니다.');
+    renderList('eduConcepts', edu.key_concepts, '핵심 개념이 없습니다.');
+    document.getElementById('eduSummary').textContent = edu.summary || '교육용 요약이 없습니다.';
+    renderQA('eduQuiz', edu.quiz, 'question', 'answer', '퀴즈가 없습니다.');
+    renderQA('eduCards', edu.flashcards, 'front', 'back', '플래시카드가 없습니다.');
+    renderList('eduActivities', edu.activities, '활동/과제가 없습니다.');
+
+    // Enable chat
+    docReady = true;
+    chatInput.disabled = false;
+    sendBtn.disabled = false;
+    emptyChat.style.display = 'none';
+    lastAnalysis = data;
+    setExportEnabled(true);
+    if(Array.isArray(data.tags)) {
+      tagInput.value = data.tags.join(', ');
+    }
+    currentRecommendations = getRecommendedTags(data);
+    renderTagSuggestions(currentRecommendations);
+
+    addMsg('agent', `"${data.filename}" 분석이 완료되었습니다.\n\n${data.summary}\n\n궁금한 점을 질문해주세요!`);
+
+  } catch(err) {
+    resetProgressTimers();
+    loader.classList.remove('active');
+    alert('분석 실패: ' + err.message);
+  }
+}
+
+// Chat
+sendBtn.addEventListener('click', sendChat);
+chatInput.addEventListener('keydown', e => { if(e.key === 'Enter' && !e.shiftKey) sendChat(); });
+tagInput.addEventListener('input', () => scheduleTagSync());
+exportMarkdown.addEventListener('click', () => {
+  if(!lastAnalysis) return;
+  const md = createMarkdownExport(lastAnalysis);
+  const base = safeFilename(lastAnalysis.filename || 'docuagent');
+  downloadFile(md, `${base}.md`, 'text/markdown');
+});
+exportHtml.addEventListener('click', () => {
+  if(!lastAnalysis) return;
+  const html = createHtmlExport(lastAnalysis);
+  const base = safeFilename(lastAnalysis.filename || 'docuagent');
+  downloadFile(html, `${base}.html`, 'text/html');
+});
+exportPdf.addEventListener('click', () => {
+  if(!lastAnalysis) return;
+  const html = createHtmlExport(lastAnalysis, true);
+  openPrintWindow(html);
+});
+exportScorm.addEventListener('click', async () => {
+  if(!lastAnalysis) return;
+  const base = safeFilename(lastAnalysis.filename || 'docuagent');
+  await downloadFromApi(`/api/export/scorm?doc_id=current`, `${base}_scorm.zip`);
+});
+exportIms.addEventListener('click', async () => {
+  if(!lastAnalysis) return;
+  const base = safeFilename(lastAnalysis.filename || 'docuagent');
+  await downloadFromApi(`/api/export/ims?doc_id=current`, `${base}_imscc.zip`);
+});
+exportScorm2004.addEventListener('click', async () => {
+  if(!lastAnalysis) return;
+  const base = safeFilename(lastAnalysis.filename || 'docuagent');
+  await downloadFromApi(`/api/export/scorm2004?doc_id=current`, `${base}_scorm2004.zip`);
+});
+exportIms13.addEventListener('click', async () => {
+  if(!lastAnalysis) return;
+  const base = safeFilename(lastAnalysis.filename || 'docuagent');
+  await downloadFromApi(`/api/export/ims13?doc_id=current`, `${base}_imscc13.zip`);
+});
+
+async function sendChat() {
+  const q = chatInput.value.trim();
+  if(!q || !docReady) return;
+
+  chatInput.value = '';
+  addMsg('user', q);
+  sendBtn.disabled = true;
+
+  const thinkMsg = addMsg('agent', '분석 중...');
+
+  try {
+    const formData = new FormData();
+    formData.append('question', q);
+    formData.append('doc_id', 'current');
+
+    const resp = await fetch('/api/chat', { method:'POST', body:formData });
+    const data = await resp.json();
+
+    thinkMsg.querySelector('.content').textContent = data.answer;
+  } catch(err) {
+    thinkMsg.querySelector('.content').textContent = '오류가 발생했습니다: ' + err.message;
+  }
+
+  sendBtn.disabled = false;
+  chatInput.focus();
+}
+
+function renderList(elId, items, emptyText) {
+  const el = document.getElementById(elId);
+  el.innerHTML = '';
+  if(!Array.isArray(items) || items.length === 0) {
+    const li = document.createElement('li');
+    li.textContent = emptyText || '내용이 없습니다.';
+    el.appendChild(li);
+    return;
+  }
+  items.forEach(item => {
+    const li = document.createElement('li');
+    li.textContent = item;
+    el.appendChild(li);
+  });
+}
+
+function renderQA(elId, items, qKey, aKey, emptyText) {
+  const el = document.getElementById(elId);
+  el.innerHTML = '';
+  if(!Array.isArray(items) || items.length === 0) {
+    const div = document.createElement('div');
+    div.className = 'qa-item';
+    div.textContent = emptyText || '내용이 없습니다.';
+    el.appendChild(div);
+    return;
+  }
+  items.forEach((item, idx) => {
+    const qa = document.createElement('div');
+    qa.className = 'qa-item';
+    const q = document.createElement('div');
+    q.className = 'qa-q';
+    q.textContent = `Q${idx + 1}. ${item?.[qKey] || ''}`;
+    const a = document.createElement('div');
+    a.className = 'qa-a';
+    a.textContent = item?.[aKey] ? `A. ${item[aKey]}` : '';
+    qa.appendChild(q);
+    qa.appendChild(a);
+    el.appendChild(qa);
+  });
+}
+
+function parseTagInput(text) {
+  return text
+    .split(/[,\n]/)
+    .map(t => t.replace(/#/g, '').trim())
+    .filter(Boolean)
+    .filter((v, i, arr) => arr.indexOf(v) === i)
+    .slice(0, 12);
+}
+
+function scheduleTagSync() {
+  if(tagSyncTimer) clearTimeout(tagSyncTimer);
+  tagSyncTimer = setTimeout(() => syncTags(), 500);
+  renderTagSuggestions(currentRecommendations);
+}
+
+async function syncTags() {
+  if(!lastAnalysis) return;
+  const tags = parseTagInput(tagInput.value);
+  tagInput.value = tags.join(', ');
+  const formData = new FormData();
+  formData.append('doc_id', 'current');
+  formData.append('tags', tags.join(','));
+  try {
+    const resp = await fetch('/api/update-tags', { method:'POST', body:formData });
+    if(!resp.ok) return;
+    const data = await resp.json();
+    lastAnalysis.tags = data.tags || tags;
+  } catch {
+    // ignore
+  }
+}
+
+function renderTagSuggestions(tags) {
+  tagSuggestions.innerHTML = '';
+  if(!tags || tags.length === 0) {
+    const empty = document.createElement('span');
+    empty.className = 'tag-label';
+    empty.textContent = '추천 없음';
+    tagSuggestions.appendChild(empty);
+    return;
+  }
+  const selected = parseTagInput(tagInput.value);
+  tags.forEach(tag => {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'tag-chip' + (selected.includes(tag) ? ' active' : '');
+    chip.textContent = tag;
+    chip.addEventListener('click', () => {
+      const current = parseTagInput(tagInput.value);
+      if(current.includes(tag)) {
+        const next = current.filter(t => t !== tag);
+        tagInput.value = next.join(', ');
+      } else {
+        current.push(tag);
+        tagInput.value = current.join(', ');
+      }
+      renderTagSuggestions(currentRecommendations);
+      scheduleTagSync();
+    });
+    tagSuggestions.appendChild(chip);
+  });
+}
+
+function getRecommendedTags(data) {
+  const tags = [];
+  const edu = data.edu_pack || {};
+  (edu.key_concepts || []).slice(0, 6).forEach(t => tags.push(String(t)));
+  const extracted = data.extracted_data || {};
+  if(extracted && typeof extracted === 'object') {
+    const docType = extracted.document_type || extracted.doc_type;
+    if(docType) tags.push(String(docType));
+    const title = extracted.title;
+    if(title && String(title).length <= 40) tags.push(String(title));
+  }
+  return tags.filter((v, i, arr) => v && arr.indexOf(v) === i).slice(0, 10);
+}
+
+function safeFilename(name) {
+  return name.replace(/\.[^/.]+$/, '').replace(/[^\w.-]+/g, '_').slice(0, 60) || 'docuagent';
+}
+
+function formatValue(val) {
+  if(val === null || val === undefined) return '-';
+  if(typeof val === 'string') return val;
+  try {
+    return JSON.stringify(val);
+  } catch {
+    return String(val);
+  }
+}
+
+function escapeHtml(text) {
+  return String(text || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function createMarkdownExport(data) {
+  const edu = data.edu_pack || {};
+  const lines = [];
+  lines.push(`# ${data.filename || 'DocuAgent 결과'}`);
+  lines.push('');
+  lines.push(`- 파일명: ${data.filename || '-'}`);
+  lines.push(`- 페이지 수: ${data.pages ?? '-'}`);
+  lines.push(`- 학습자 수준: ${data.audience || '-'}`);
+  lines.push(`- 학습 목표: ${data.goal || '-'}`);
+  lines.push(`- 태그: ${(data.tags && data.tags.length) ? data.tags.join(', ') : '-'}`);
+  lines.push(`- 생성일: ${new Date().toISOString()}`);
+  lines.push('');
+  lines.push('## 요약');
+  lines.push(data.summary || '-');
+  lines.push('');
+  lines.push('## 추출 정보');
+  if(data.extracted_data && typeof data.extracted_data === 'object') {
+    for(const [k, v] of Object.entries(data.extracted_data)) {
+      if(k === 'raw') continue;
+      lines.push(`- ${k}: ${formatValue(v)}`);
+    }
+  } else {
+    lines.push('- 없음');
+  }
+  lines.push('');
+  lines.push('## 교육 콘텐츠');
+  lines.push('### 학습 목표');
+  (edu.learning_objectives || []).forEach(v => lines.push(`- ${v}`));
+  if(!edu.learning_objectives || edu.learning_objectives.length === 0) lines.push('- 없음');
+  lines.push('');
+  lines.push('### 핵심 개념');
+  (edu.key_concepts || []).forEach(v => lines.push(`- ${v}`));
+  if(!edu.key_concepts || edu.key_concepts.length === 0) lines.push('- 없음');
+  lines.push('');
+  lines.push('### 교육용 요약');
+  lines.push(edu.summary || '-');
+  lines.push('');
+  lines.push('### 퀴즈');
+  if(Array.isArray(edu.quiz) && edu.quiz.length) {
+    edu.quiz.forEach((q, i) => {
+      lines.push(`${i + 1}. Q: ${q.question || ''}`);
+      lines.push(`   A: ${q.answer || ''}`);
+    });
+  } else {
+    lines.push('- 없음');
+  }
+  lines.push('');
+  lines.push('### 플래시카드');
+  if(Array.isArray(edu.flashcards) && edu.flashcards.length) {
+    edu.flashcards.forEach((c, i) => {
+      lines.push(`${i + 1}. Front: ${c.front || ''}`);
+      lines.push(`   Back: ${c.back || ''}`);
+    });
+  } else {
+    lines.push('- 없음');
+  }
+  lines.push('');
+  lines.push('### 활동/과제');
+  (edu.activities || []).forEach(v => lines.push(`- ${v}`));
+  if(!edu.activities || edu.activities.length === 0) lines.push('- 없음');
+  lines.push('');
+  lines.push('## 원문 파싱');
+  lines.push(data.parsed_markdown || '-');
+  return lines.join('\n');
+}
+
+function createHtmlExport(data, forPrint = false) {
+  const edu = data.edu_pack || {};
+  const styles = `
+    body{font-family:Arial, sans-serif; line-height:1.6; padding:32px; color:#111;}
+    h1,h2,h3{margin:0 0 12px;}
+    h2{margin-top:26px; border-bottom:1px solid #ddd; padding-bottom:6px;}
+    .meta{font-size:12px; color:#555;}
+    .card{background:#f8f8fb; border:1px solid #e6e6ee; padding:12px 14px; border-radius:8px;}
+    .qa{margin:8px 0; padding:8px 10px; border:1px solid #e3e3ee; border-radius:8px;}
+    .muted{color:#666;}
+    @media print{body{padding:0;} h1{margin-top:0;} }
+  `;
+  const listItems = (items) => items && items.length ? items.map(i => `<li>${escapeHtml(i)}</li>`).join('') : '<li>없음</li>';
+  const qaItems = (items, qKey, aKey) => items && items.length
+    ? items.map((q, i) => `<div class="qa"><strong>Q${i + 1}.</strong> ${escapeHtml(q?.[qKey] || '')}<br><span class="muted">A.</span> ${escapeHtml(q?.[aKey] || '')}</div>`).join('')
+    : '<div class="qa">없음</div>';
+  const extracted = data.extracted_data && typeof data.extracted_data === 'object'
+    ? Object.entries(data.extracted_data).filter(([k]) => k !== 'raw').map(([k, v]) => `<li><strong>${escapeHtml(k)}:</strong> ${escapeHtml(formatValue(v))}</li>`).join('')
+    : '<li>없음</li>';
+  const title = escapeHtml(data.filename || 'DocuAgent 결과');
+  return `<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>${title}</title>
+  <style>${styles}</style>
+</head>
+<body>
+  <h1>${title}</h1>
+  <div class="meta">
+    <div>페이지 수: ${escapeHtml(data.pages ?? '-')}</div>
+    <div>학습자 수준: ${escapeHtml(data.audience || '-')}</div>
+    <div>학습 목표: ${escapeHtml(data.goal || '-')}</div>
+    <div>태그: ${escapeHtml((data.tags && data.tags.length) ? data.tags.join(', ') : '-')}</div>
+    <div>생성일: ${new Date().toISOString()}</div>
+  </div>
+
+  <h2>요약</h2>
+  <div class="card">${escapeHtml(data.summary || '-')}</div>
+
+  <h2>추출 정보</h2>
+  <ul>${extracted}</ul>
+
+  <h2>교육 콘텐츠</h2>
+  <h3>학습 목표</h3>
+  <ul>${listItems(edu.learning_objectives || [])}</ul>
+  <h3>핵심 개념</h3>
+  <ul>${listItems(edu.key_concepts || [])}</ul>
+  <h3>교육용 요약</h3>
+  <div class="card">${escapeHtml(edu.summary || '-')}</div>
+  <h3>퀴즈</h3>
+  ${qaItems(edu.quiz || [], 'question', 'answer')}
+  <h3>플래시카드</h3>
+  ${qaItems(edu.flashcards || [], 'front', 'back')}
+  <h3>활동/과제</h3>
+  <ul>${listItems(edu.activities || [])}</ul>
+
+  <h2>원문 파싱</h2>
+  <div class="card"><pre>${escapeHtml(data.parsed_markdown || '-')}</pre></div>
+</body>
+</html>`;
+}
+
+function downloadFile(content, filename, mime) {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function openPrintWindow(html) {
+  const win = window.open('', '_blank', 'width=900,height=1200');
+  if(!win) return alert('팝업이 차단되었습니다. 팝업을 허용해 주세요.');
+  win.document.open();
+  win.document.write(html);
+  win.document.close();
+  win.focus();
+  win.onload = () => win.print();
+}
+
+async function downloadFromApi(url, filename) {
+  try {
+    const resp = await fetch(url);
+    if(!resp.ok) throw new Error('다운로드 실패');
+    const blob = await resp.blob();
+    const a = document.createElement('a');
+    const blobUrl = URL.createObjectURL(blob);
+    a.href = blobUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(blobUrl);
+  } catch (err) {
+    alert(err.message || '다운로드 중 오류가 발생했습니다.');
+  }
+}
+
+function addMsg(role, text) {
+  const div = document.createElement('div');
+  div.className = `msg ${role}`;
+  const sender = role === 'agent' ? 'DocuAgent' : '나';
+  div.innerHTML = `<div class="sender">${sender}</div><div class="content">${text.replace(/\n/g,'<br>')}</div>`;
+  chatMessages.appendChild(div);
+  chatMessages.scrollTop = chatMessages.scrollHeight;
+  return div;
+}
+</script>
+</body>
+</html>
