@@ -37,6 +37,7 @@ pip install -r requirements.txt
 export UPSTAGE_API_KEY="your_api_key_here"
 ```
 또는 .env 파일 사용
+키를 설정하지 않으면 **데모 모드(스텁 출력)**로 동작하여, 외부 API 없이도 UI 흐름을 끝까지 확인할 수 있습니다.
 
 ### 3) 실행
 ```

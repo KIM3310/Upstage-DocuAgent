@@ -1,8 +1,11 @@
-.env
 __pycache__/
 *.pyc
-.DS_Store
 
-# Local artifacts
-*.log
-*.tmp
+.venv/
+venv/
+
+.env
+.env.*
+!.env.example
+
+.DS_Store

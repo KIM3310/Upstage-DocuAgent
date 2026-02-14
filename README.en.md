@@ -37,6 +37,7 @@ pip install -r requirements.txt
 export UPSTAGE_API_KEY="your_api_key_here"
 ```
 Or use .env
+If you skip the key, DocuAgent runs in **demo mode** (stubbed outputs) so you can still try the UI end-to-end.
 
 ### 3) Run
 ```

@@ -31,11 +31,17 @@ def _load_env(path: str = ".env") -> None:
 
 # ─── Config ───
 _load_env()
-API_KEY = os.getenv("UPSTAGE_API_KEY", "your_api_key_here")
-BASE_URL = "https://api.upstage.ai/v1"
-SOLAR_MODEL = "solar-pro2"
 
-client = OpenAI(api_key=API_KEY, base_url=BASE_URL)
+# API key is optional. If missing, the app runs in demo mode (stubbed responses)
+# so reviewers can still run the end-to-end UI without external calls.
+API_KEY = os.getenv("UPSTAGE_API_KEY", "").strip()
+DOCUAGENT_MODE = os.getenv("DOCUAGENT_MODE", "").strip().lower()
+DEMO_MODE = DOCUAGENT_MODE in {"demo", "stub"} or not API_KEY
+
+BASE_URL = os.getenv("UPSTAGE_BASE_URL", "https://api.upstage.ai/v1").rstrip("/")
+SOLAR_MODEL = os.getenv("UPSTAGE_SOLAR_MODEL", "solar-pro2")
+
+client = None if DEMO_MODE else OpenAI(api_key=API_KEY, base_url=BASE_URL)
 
 app = FastAPI(title="DocuAgent", version="1.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -74,6 +80,29 @@ def _extract_json(content: str) -> Optional[dict]:
 
 def call_document_parse(file_bytes: bytes, filename: str) -> dict:
     """Step 1: Document Parse — 문서를 구조화된 마크다운으로 변환"""
+    if DEMO_MODE:
+        # Demo mode: keep the pipeline runnable without external APIs.
+        text_hint = ""
+        lower = (filename or "").lower()
+        if lower.endswith((".txt", ".md")):
+            try:
+                text_hint = file_bytes.decode("utf-8", errors="ignore")[:4000]
+            except Exception:
+                text_hint = ""
+        if not text_hint:
+            text_hint = (
+                "(demo) Document Parse is stubbed. Configure UPSTAGE_API_KEY to enable real parsing."
+            )
+        markdown = (
+            f"# Demo Document Parse\n\n"
+            f"**Filename:** {html.escape(filename or 'document')}\n\n"
+            f"{text_hint}\n"
+        )
+        return {"markdown": markdown, "elements": [], "pages": 1}
+
+    if not API_KEY:
+        raise HTTPException(500, "UPSTAGE_API_KEY is not configured.")
+
     url = f"{BASE_URL}/document-ai/document-parse"
     headers = {"Authorization": f"Bearer {API_KEY}"}
     
@@ -95,6 +124,19 @@ def call_document_parse(file_bytes: bytes, filename: str) -> dict:
 
 def call_information_extract(file_bytes: bytes, filename: str, schema: dict) -> dict:
     """Step 2: Information Extract — 문서에서 구조화된 데이터 추출"""
+    if DEMO_MODE:
+        # Demo mode: return a schema-shaped placeholder so downstream steps work.
+        props = (schema or {}).get("properties", {}) if isinstance(schema, dict) else {}
+        extracted: dict = {}
+        for key in props.keys():
+            extracted[str(key)] = ""
+        if "title" in extracted and not extracted["title"]:
+            extracted["title"] = Path(filename or "document").stem
+        extracted.setdefault("mode", "demo")
+        return extracted
+
+    if not API_KEY:
+        raise HTTPException(500, "UPSTAGE_API_KEY is not configured.")
     
     # PDF → 이미지 변환 필요 (IE는 이미지 입력)
     if filename.lower().endswith(".pdf"):
@@ -195,6 +237,15 @@ def _pdf_to_png_bytes(file_bytes: bytes) -> bytes:
 
 def call_solar_chat(system_prompt: str, user_message: str, history: list = None) -> str:
     """Solar — 문서 기반 Q&A"""
+    if DEMO_MODE:
+        return (
+            "Demo mode: Solar responses are stubbed. "
+            "Configure UPSTAGE_API_KEY to enable real generation."
+        )
+
+    if client is None:
+        raise HTTPException(500, "UPSTAGE_API_KEY is not configured.")
+
     messages = [{"role": "system", "content": system_prompt}]
     
     if history:
@@ -214,6 +265,22 @@ def call_solar_chat(system_prompt: str, user_message: str, history: list = None)
 
 def auto_detect_schema(parsed_markdown: str) -> dict:
     """Solar로 문서 유형을 분석하고 자동으로 추출 스키마 생성"""
+    if DEMO_MODE:
+        # Keep the app usable without external calls.
+        return {
+            "type": "object",
+            "properties": {
+                "document_type": {"type": "string", "description": "문서 유형"},
+                "title": {"type": "string", "description": "문서 제목"},
+                "date": {"type": "string", "description": "날짜"},
+                "author_or_issuer": {"type": "string", "description": "작성자/발행자"},
+                "key_content": {"type": "string", "description": "핵심 내용"},
+                "amounts_or_numbers": {"type": "string", "description": "금액/수치"},
+            },
+        }
+
+    if client is None:
+        raise HTTPException(500, "UPSTAGE_API_KEY is not configured.")
     
     prompt = """당신은 문서 분석 전문가입니다. 아래 문서 내용을 보고, 이 문서에서 추출해야 할 핵심 필드를 JSON Schema 형태로 생성하세요.
 
@@ -267,6 +334,58 @@ def generate_edu_pack(
     goal: str
 ) -> dict:
     """교육 콘텐츠 패키지 생성 (학습 목표/핵심 개념/퀴즈/플래시카드 등)"""
+    if DEMO_MODE or client is None:
+        # Demo mode: return a helpful, schema-shaped placeholder so the UI flow works end-to-end
+        # without external API calls.
+        title = ""
+        if isinstance(extracted_data, dict):
+            title = str(extracted_data.get("title") or extracted_data.get("document_type") or "")
+        title = title.strip()
+
+        key_concepts: list[str] = []
+        if title:
+            key_concepts.append(title)
+
+        if isinstance(extracted_data, dict):
+            for k, v in extracted_data.items():
+                if k in {"mode", "raw"}:
+                    continue
+                v_str = str(v or "").strip()
+                if not v_str:
+                    continue
+                # Avoid dumping long strings into the UI.
+                if len(v_str) > 40:
+                    v_str = v_str[:37] + "..."
+                candidate = v_str
+                if candidate and candidate not in key_concepts:
+                    key_concepts.append(candidate)
+                if len(key_concepts) >= 6:
+                    break
+
+        if not key_concepts:
+            key_concepts = ["문서 구조", "핵심 개념", "용어 정리"]
+
+        demo_summary = (
+            "Demo mode: learning pack generation is stubbed. "
+            "Configure UPSTAGE_API_KEY to enable real generation."
+        )
+
+        return {
+            "learning_objectives": [
+                "문서의 목적과 핵심 내용을 파악한다",
+                "핵심 용어/개념을 정리한다",
+                "문서 기반 질문에 답할 수 있다",
+            ],
+            "key_concepts": key_concepts,
+            "summary": demo_summary,
+            "quiz": [{"question": "이 문서의 핵심 주제는 무엇인가요?", "answer": title or "문서 내용을 기반으로 정리합니다."}],
+            "flashcards": [{"front": "핵심 개념", "back": ", ".join(key_concepts[:3])}],
+            "activities": [
+                "문서에서 중요한 문장을 3개 선택해 근거와 함께 정리하기",
+                "핵심 개념 3개를 예시와 함께 설명하기",
+            ],
+        }
+
     prompt = f"""당신은 교육 콘텐츠 설계 전문가입니다. 아래 문서 내용과 추출 정보를 바탕으로 교육용 패키지를 JSON으로만 출력하세요.
 
 학습자 수준: {audience}
