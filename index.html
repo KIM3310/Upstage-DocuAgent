@@ -107,6 +107,22 @@ body::after {
   border:1px solid rgba(255,255,255,0.12);
   box-shadow:0 6px 16px rgba(111, 91, 255, 0.35);
 }
+.header .tag--status {
+  background:rgba(233, 230, 247, 0.07);
+  color:var(--text);
+  border:1px solid rgba(150, 140, 210, 0.25);
+  box-shadow:none;
+}
+.header .tag--status[data-mode="demo"] {
+  background:linear-gradient(135deg, rgba(243, 184, 122, 0.95), rgba(240, 128, 128, 0.85));
+  color:#1a1224;
+  border-color:rgba(255,255,255,0.15);
+}
+.header .tag--status[data-mode="live"] {
+  background:linear-gradient(135deg, rgba(61, 214, 179, 0.9), rgba(139, 122, 255, 0.82));
+  color:#041014;
+  border-color:rgba(255,255,255,0.12);
+}
 .header .powered {
   margin-left:auto; font-size:12px; color:var(--text2);
   font-family:'Sora','Pretendard',sans-serif;
@@ -150,6 +166,27 @@ body::after {
 .drop-area .formats { font-size:11px; color:var(--text2); margin-top:6px; opacity:0.7; }
 
 .file-input { display:none; }
+.sample-row {
+  margin-top:12px;
+  display:flex;
+  gap:10px;
+  flex-wrap:wrap;
+}
+.ghost-btn {
+  padding:8px 10px;
+  border-radius:10px;
+  border:1px solid var(--border);
+  background:rgba(18, 19, 33, 0.6);
+  color:var(--text);
+  font-size:12px;
+  cursor:pointer;
+  transition:all 0.2s;
+}
+.ghost-btn:hover {
+  border-color:var(--accent2);
+  box-shadow:0 0 0 3px rgba(139, 122, 255, 0.12);
+  transform:translateY(-1px);
+}
 
 .edu-controls {
   margin-top:14px; display:flex; gap:12px; flex-wrap:wrap;
@@ -406,14 +443,15 @@ body::after {
 
 <div class="header">
   <div class="brand">
-    <img class="brand-logo" src="assets/upstage-logo.svg" alt="Upstage logo">
+    <img class="brand-logo" src="assets/docuagent-logo.svg" alt="DocuAgent logo">
     <div class="brand-text">
       <div class="brand-sub">업스테이지 엠버서더 · 도큐 에이전트</div>
     </div>
   </div>
   <h1>Docu<span>Agent</span></h1>
   <div class="tag">문서 분석</div>
-  <div class="powered">Upstage Solar · Document Parse · Information Extract</div>
+  <div class="tag tag--status" id="modeTag" title="Runtime mode">...</div>
+  <div class="powered" id="poweredLine">Upstage Solar · Document Parse · Information Extract</div>
 </div>
 
 <div class="pipeline">
@@ -435,6 +473,10 @@ body::after {
         <div class="formats">PDF, PNG, JPG, TIFF 지원</div>
       </div>
       <input type="file" class="file-input" id="fileInput" accept=".pdf,.png,.jpg,.jpeg,.tiff">
+      <div class="sample-row">
+        <button type="button" class="ghost-btn" id="sampleKo">샘플 불러오기 (KO)</button>
+        <button type="button" class="ghost-btn" id="sampleEn">Sample (EN)</button>
+      </div>
       <div class="edu-controls">
         <div class="control">
           <label for="audienceSelect">학습자 수준</label>
@@ -579,9 +621,14 @@ const exportScorm = document.getElementById('exportScorm');
 const exportIms = document.getElementById('exportIms');
 const exportScorm2004 = document.getElementById('exportScorm2004');
 const exportIms13 = document.getElementById('exportIms13');
+const modeTag = document.getElementById('modeTag');
+const poweredLine = document.getElementById('poweredLine');
+const sampleKo = document.getElementById('sampleKo');
+const sampleEn = document.getElementById('sampleEn');
 
 let progressTimers = [];
 let lastAnalysis = null;
+let currentDocId = null;
 let tagSyncTimer = null;
 let currentRecommendations = [];
 function resetProgressTimers() {
@@ -612,10 +659,47 @@ dropArea.addEventListener('drop', e => {
 });
 fileInput.addEventListener('change', e => { if(e.target.files.length) handleFile(e.target.files[0]); });
 
+async function initHealth() {
+  if(!modeTag) return;
+  try {
+    const resp = await fetch('/healthz');
+    const data = await resp.json();
+    const demo = !!data.demo_mode;
+    modeTag.textContent = demo ? 'DEMO' : 'LIVE';
+    modeTag.dataset.mode = demo ? 'demo' : 'live';
+    modeTag.title = demo
+      ? 'Demo mode: runs end-to-end without paid keys (no external API calls)'
+      : 'Live mode: UPSTAGE_API_KEY detected';
+    if(poweredLine && demo) {
+      poweredLine.textContent = 'Demo mode · Local parse + deterministic outputs (set UPSTAGE_API_KEY for live)';
+    }
+  } catch {
+    modeTag.textContent = '...';
+  }
+}
+
+async function loadSample(url, filename) {
+  try {
+    const resp = await fetch(url);
+    if(!resp.ok) throw new Error('샘플 파일을 찾을 수 없습니다.');
+    const blob = await resp.blob();
+    const file = new File([blob], filename, { type: blob.type || 'application/pdf' });
+    handleFile(file);
+  } catch(err) {
+    alert('샘플 로드 실패: ' + (err?.message || String(err)));
+  }
+}
+
+if(sampleKo) sampleKo.addEventListener('click', () => loadSample('/assets/demo-learning-ko.pdf', 'demo-learning-ko.pdf'));
+if(sampleEn) sampleEn.addEventListener('click', () => loadSample('/assets/demo-learning.pdf', 'demo-learning.pdf'));
+
+initHealth();
+
 async function handleFile(file) {
   // Reset
   resetProgressTimers();
   lastAnalysis = null;
+  currentDocId = null;
   setExportEnabled(false);
   docReady = false;
   chatInput.disabled = true;
@@ -731,6 +815,7 @@ async function handleFile(file) {
     sendBtn.disabled = false;
     emptyChat.style.display = 'none';
     lastAnalysis = data;
+    currentDocId = data.doc_id || 'current';
     setExportEnabled(true);
     if(Array.isArray(data.tags)) {
       tagInput.value = data.tags.join(', ');
@@ -771,22 +856,26 @@ exportPdf.addEventListener('click', () => {
 exportScorm.addEventListener('click', async () => {
   if(!lastAnalysis) return;
   const base = safeFilename(lastAnalysis.filename || 'docuagent');
-  await downloadFromApi(`/api/export/scorm?doc_id=current`, `${base}_scorm.zip`);
+  const doc = encodeURIComponent(currentDocId || 'current');
+  await downloadFromApi(`/api/export/scorm?doc_id=${doc}`, `${base}_scorm.zip`);
 });
 exportIms.addEventListener('click', async () => {
   if(!lastAnalysis) return;
   const base = safeFilename(lastAnalysis.filename || 'docuagent');
-  await downloadFromApi(`/api/export/ims?doc_id=current`, `${base}_imscc.zip`);
+  const doc = encodeURIComponent(currentDocId || 'current');
+  await downloadFromApi(`/api/export/ims?doc_id=${doc}`, `${base}_imscc.zip`);
 });
 exportScorm2004.addEventListener('click', async () => {
   if(!lastAnalysis) return;
   const base = safeFilename(lastAnalysis.filename || 'docuagent');
-  await downloadFromApi(`/api/export/scorm2004?doc_id=current`, `${base}_scorm2004.zip`);
+  const doc = encodeURIComponent(currentDocId || 'current');
+  await downloadFromApi(`/api/export/scorm2004?doc_id=${doc}`, `${base}_scorm2004.zip`);
 });
 exportIms13.addEventListener('click', async () => {
   if(!lastAnalysis) return;
   const base = safeFilename(lastAnalysis.filename || 'docuagent');
-  await downloadFromApi(`/api/export/ims13?doc_id=current`, `${base}_imscc13.zip`);
+  const doc = encodeURIComponent(currentDocId || 'current');
+  await downloadFromApi(`/api/export/ims13?doc_id=${doc}`, `${base}_imscc13.zip`);
 });
 
 async function sendChat() {
@@ -802,7 +891,7 @@ async function sendChat() {
   try {
     const formData = new FormData();
     formData.append('question', q);
-    formData.append('doc_id', 'current');
+    formData.append('doc_id', currentDocId || 'current');
 
     const resp = await fetch('/api/chat', { method:'POST', body:formData });
     const data = await resp.json();
@@ -877,7 +966,7 @@ async function syncTags() {
   const tags = parseTagInput(tagInput.value);
   tagInput.value = tags.join(', ');
   const formData = new FormData();
-  formData.append('doc_id', 'current');
+  formData.append('doc_id', currentDocId || 'current');
   formData.append('tags', tags.join(','));
   try {
     const resp = await fetch('/api/update-tags', { method:'POST', body:formData });

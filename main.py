@@ -3,9 +3,22 @@ DocuAgent — Upstage 기반 문서 분석 서비스
 Solar · Document Parse · Information Extract
 """
 
-import os, json, base64, tempfile, subprocess, io, zipfile, datetime, html, shutil
+import base64
+import datetime
+import html
+import io
+import json
+import mimetypes
+import os
+import re
+import secrets
+import shutil
+import subprocess
+import tempfile
+import zipfile
+from collections import OrderedDict
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import requests
 from openai import OpenAI
@@ -31,17 +44,62 @@ def _load_env(path: str = ".env") -> None:
 
 # ─── Config ───
 _load_env()
+DEFAULT_UPSTAGE_BASE_URL = "https://api.upstage.ai/v1"
+DEFAULT_SOLAR_MODEL = "solar-pro2"
 
-# API key is optional. If missing, the app runs in demo mode (stubbed responses)
-# so reviewers can still run the end-to-end UI without external calls.
-API_KEY = os.getenv("UPSTAGE_API_KEY", "").strip()
-DOCUAGENT_MODE = os.getenv("DOCUAGENT_MODE", "").strip().lower()
-DEMO_MODE = DOCUAGENT_MODE in {"demo", "stub"} or not API_KEY
+MAX_UPLOAD_BYTES = int(os.getenv("DOCUAGENT_MAX_UPLOAD_BYTES", str(20 * 1024 * 1024)))
+MAX_DOCS_IN_MEMORY = int(os.getenv("DOCUAGENT_MAX_DOCS", "25"))
 
-BASE_URL = os.getenv("UPSTAGE_BASE_URL", "https://api.upstage.ai/v1").rstrip("/")
-SOLAR_MODEL = os.getenv("UPSTAGE_SOLAR_MODEL", "solar-pro2")
 
-client = None if DEMO_MODE else OpenAI(api_key=API_KEY, base_url=BASE_URL)
+def _truthy(value: Optional[str]) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _get_upstage_api_key() -> str:
+    return (os.getenv("UPSTAGE_API_KEY") or "").strip()
+
+
+def _get_upstage_base_url() -> str:
+    return (os.getenv("UPSTAGE_BASE_URL") or DEFAULT_UPSTAGE_BASE_URL).rstrip("/")
+
+
+def _get_solar_model() -> str:
+    return (os.getenv("UPSTAGE_SOLAR_MODEL") or DEFAULT_SOLAR_MODEL).strip()
+
+
+def _is_demo_mode() -> bool:
+    # Force demo mode for reviewers: no paid keys required.
+    if (os.getenv("DOCUAGENT_MODE") or "").strip().lower() in {"demo", "stub"}:
+        return True
+
+    if _truthy(os.getenv("DOCUAGENT_DEMO_MODE")):
+        return True
+
+    key = _get_upstage_api_key()
+    if not key:
+        return True
+
+    # Common placeholder values.
+    if key.lower() in {"your_api_key_here", "change_me"}:
+        return True
+
+    return False
+
+
+_client: Optional[OpenAI] = None
+
+
+def _get_upstage_client() -> OpenAI:
+    global _client
+    if _client is not None:
+        return _client
+
+    key = _get_upstage_api_key()
+    if not key:
+        raise RuntimeError("UPSTAGE_API_KEY is not set")
+
+    _client = OpenAI(api_key=key, base_url=_get_upstage_base_url())
+    return _client
 
 app = FastAPI(title="DocuAgent", version="1.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -52,7 +110,14 @@ if assets_dir.exists():
     app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
 
 # In-memory document store (per session, demo purpose)
-doc_store: dict = {}
+doc_store: "OrderedDict[str, dict[str, Any]]" = OrderedDict()
+
+
+def _put_doc(doc_id: str, doc: dict[str, Any]) -> None:
+    doc_store[doc_id] = doc
+    doc_store.move_to_end(doc_id)
+    while len(doc_store) > MAX_DOCS_IN_MEMORY:
+        doc_store.popitem(last=False)
 
 
 # ─── Helpers ───
@@ -60,61 +125,69 @@ doc_store: dict = {}
 def _extract_json(content: str) -> Optional[dict]:
     """Best-effort JSON extraction from model responses."""
     text = (content or "").strip()
-    if "```" in text:
-        parts = text.split("```")
-        if len(parts) >= 2:
-            text = parts[1].strip()
-            if text.lower().startswith("json"):
-                text = text[4:].strip()
+    if not text:
+        return None
+
+    fence = re.search(r"```(?:json)?\s*([\s\S]*?)```", text, flags=re.IGNORECASE)
+    if fence:
+        text = fence.group(1).strip()
+
     start = text.find("{")
     end = text.rfind("}")
     if start != -1 and end != -1 and end > start:
         text = text[start:end + 1]
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        return None
+
+    def try_load(raw: str) -> Optional[dict]:
+        try:
+            loaded = json.loads(raw)
+            return loaded if isinstance(loaded, dict) else None
+        except json.JSONDecodeError:
+            return None
+
+    loaded = try_load(text)
+    if loaded is not None:
+        return loaded
+
+    # Repair the most common drift: trailing commas.
+    repaired = re.sub(r",\s*([}\]])", r"\1", text)
+    return try_load(repaired)
 
 
 # ─── Upstage API Wrappers ───
 
 def call_document_parse(file_bytes: bytes, filename: str) -> dict:
-    """Step 1: Document Parse — 문서를 구조화된 마크다운으로 변환"""
-    if DEMO_MODE:
-        # Demo mode: keep the pipeline runnable without external APIs.
-        text_hint = ""
-        lower = (filename or "").lower()
-        if lower.endswith((".txt", ".md")):
-            try:
-                text_hint = file_bytes.decode("utf-8", errors="ignore")[:4000]
-            except Exception:
-                text_hint = ""
-        if not text_hint:
-            text_hint = (
-                "(demo) Document Parse is stubbed. Configure UPSTAGE_API_KEY to enable real parsing."
-            )
-        markdown = (
-            f"# Demo Document Parse\n\n"
-            f"**Filename:** {html.escape(filename or 'document')}\n\n"
-            f"{text_hint}\n"
+    """Step 1 (Live): Document Parse — 문서를 구조화된 마크다운으로 변환"""
+    if _is_demo_mode():
+        raise HTTPException(
+            400,
+            "Demo mode is enabled (no external API calls). "
+            "Set UPSTAGE_API_KEY and unset DOCUAGENT_DEMO_MODE to run live parsing.",
         )
-        return {"markdown": markdown, "elements": [], "pages": 1}
 
-    if not API_KEY:
-        raise HTTPException(500, "UPSTAGE_API_KEY is not configured.")
+    api_key = _get_upstage_api_key()
+    if not api_key:
+        raise HTTPException(400, "UPSTAGE_API_KEY is not set.")
 
-    url = f"{BASE_URL}/document-ai/document-parse"
-    headers = {"Authorization": f"Bearer {API_KEY}"}
-    
-    mime = "application/pdf" if filename.lower().endswith(".pdf") else "image/png"
+    url = f"{_get_upstage_base_url()}/document-ai/document-parse"
+    headers = {"Authorization": f"Bearer {api_key}"}
+
+    mime, _ = mimetypes.guess_type(filename)
+    if not mime and filename.lower().endswith((".tif", ".tiff")):
+        mime = "image/tiff"
+    mime = mime or "application/octet-stream"
+
     files = {"document": (filename, file_bytes, mime)}
     data = {"output_format": "markdown"}
-    
-    resp = requests.post(url, headers=headers, files=files, data=data)
+
+    resp = requests.post(url, headers=headers, files=files, data=data, timeout=90)
     if resp.status_code != 200:
-        raise HTTPException(500, f"Document Parse 실패: {resp.text}")
-    
-    result = resp.json()
+        raise HTTPException(502, f"Document Parse 실패({resp.status_code}): {resp.text}")
+
+    try:
+        result = resp.json()
+    except Exception:
+        raise HTTPException(502, "Document Parse 응답이 JSON 형식이 아닙니다.")
+
     return {
         "markdown": result.get("content", {}).get("markdown", ""),
         "elements": result.get("elements", []),
@@ -123,29 +196,26 @@ def call_document_parse(file_bytes: bytes, filename: str) -> dict:
 
 
 def call_information_extract(file_bytes: bytes, filename: str, schema: dict) -> dict:
-    """Step 2: Information Extract — 문서에서 구조화된 데이터 추출"""
-    if DEMO_MODE:
-        # Demo mode: return a schema-shaped placeholder so downstream steps work.
-        props = (schema or {}).get("properties", {}) if isinstance(schema, dict) else {}
-        extracted: dict = {}
-        for key in props.keys():
-            extracted[str(key)] = ""
-        if "title" in extracted and not extracted["title"]:
-            extracted["title"] = Path(filename or "document").stem
-        extracted.setdefault("mode", "demo")
-        return extracted
+    """Step 2 (Live): Information Extract — 문서에서 구조화된 데이터 추출"""
+    if _is_demo_mode():
+        raise HTTPException(
+            400,
+            "Demo mode is enabled (no external API calls). "
+            "Set UPSTAGE_API_KEY and unset DOCUAGENT_DEMO_MODE to run live extraction.",
+        )
 
-    if not API_KEY:
-        raise HTTPException(500, "UPSTAGE_API_KEY is not configured.")
-    
-    # PDF → 이미지 변환 필요 (IE는 이미지 입력)
+    api_key = _get_upstage_api_key()
+    if not api_key:
+        raise HTTPException(400, "UPSTAGE_API_KEY is not set.")
+
+    # IE는 이미지 입력이므로, PDF/이미지를 PNG로 정규화한다.
     if filename.lower().endswith(".pdf"):
         img_bytes = _pdf_to_png_bytes(file_bytes)
-        b64_data = base64.b64encode(img_bytes).decode()
     else:
-        b64_data = base64.b64encode(file_bytes).decode()
-    
-    # IE API 호출
+        img_bytes = _image_to_png_bytes(file_bytes)
+    b64_data = base64.b64encode(img_bytes).decode()
+
+    # IE API 호출 (Upstage OpenAI-compatible style)
     ie_payload = {
         "model": "information-extract",
         "messages": [{
@@ -165,26 +235,54 @@ def call_information_extract(file_bytes: bytes, filename: str, schema: dict) -> 
     }
     
     headers = {
-        "Authorization": f"Bearer {API_KEY}",
+        "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json"
     }
     
     resp = requests.post(
-        f"{BASE_URL}/information-extraction",
+        f"{_get_upstage_base_url()}/information-extraction",
         headers=headers,
-        json=ie_payload
+        json=ie_payload,
+        timeout=90,
     )
     
     if resp.status_code != 200:
-        raise HTTPException(500, f"Information Extract 실패: {resp.text}")
-    
-    result = resp.json()
-    content = result["choices"][0]["message"]["content"]
+        raise HTTPException(502, f"Information Extract 실패({resp.status_code}): {resp.text}")
+
+    try:
+        result = resp.json()
+        content = result["choices"][0]["message"]["content"]
+    except Exception:
+        raise HTTPException(502, "Information Extract 응답 파싱 실패 (choices/message/content).")
     
     try:
         return json.loads(content)
     except json.JSONDecodeError:
         return {"raw": content}
+
+
+def _image_to_png_bytes(file_bytes: bytes) -> bytes:
+    """Convert arbitrary image bytes into PNG bytes for consistent downstream handling."""
+    try:
+        from PIL import Image
+    except Exception as e:
+        raise HTTPException(500, f"Pillow가 필요합니다: {e}")
+
+    try:
+        img = Image.open(io.BytesIO(file_bytes))
+    except Exception as e:
+        raise HTTPException(400, f"이미지 파일을 열 수 없습니다: {e}")
+
+    if img.mode in {"RGBA", "LA"}:
+        bg = Image.new("RGB", img.size, (255, 255, 255))
+        bg.paste(img, mask=img.split()[-1])
+        img = bg
+    else:
+        img = img.convert("RGB")
+
+    buf = io.BytesIO()
+    img.save(buf, format="PNG", optimize=True)
+    return buf.getvalue()
 
 
 def _pdf_to_png_bytes(file_bytes: bytes) -> bytes:
@@ -237,14 +335,15 @@ def _pdf_to_png_bytes(file_bytes: bytes) -> bytes:
 
 def call_solar_chat(system_prompt: str, user_message: str, history: list = None) -> str:
     """Solar — 문서 기반 Q&A"""
-    if DEMO_MODE:
-        return (
-            "Demo mode: Solar responses are stubbed. "
-            "Configure UPSTAGE_API_KEY to enable real generation."
+    if _is_demo_mode():
+        raise HTTPException(
+            400,
+            "Demo mode is enabled (no external API calls). "
+            "Set UPSTAGE_API_KEY and unset DOCUAGENT_DEMO_MODE to use Solar.",
         )
 
-    if client is None:
-        raise HTTPException(500, "UPSTAGE_API_KEY is not configured.")
+    client = _get_upstage_client()
+    model = _get_solar_model()
 
     messages = [{"role": "system", "content": system_prompt}]
     
@@ -254,7 +353,7 @@ def call_solar_chat(system_prompt: str, user_message: str, history: list = None)
     messages.append({"role": "user", "content": user_message})
     
     response = client.chat.completions.create(
-        model=SOLAR_MODEL,
+        model=model,
         messages=messages,
         max_tokens=1500,
         temperature=0.3,
@@ -265,8 +364,8 @@ def call_solar_chat(system_prompt: str, user_message: str, history: list = None)
 
 def auto_detect_schema(parsed_markdown: str) -> dict:
     """Solar로 문서 유형을 분석하고 자동으로 추출 스키마 생성"""
-    if DEMO_MODE:
-        # Keep the app usable without external calls.
+    # Demo mode: deterministic fallback schema (no network call).
+    if _is_demo_mode():
         return {
             "type": "object",
             "properties": {
@@ -279,8 +378,8 @@ def auto_detect_schema(parsed_markdown: str) -> dict:
             },
         }
 
-    if client is None:
-        raise HTTPException(500, "UPSTAGE_API_KEY is not configured.")
+    client = _get_upstage_client()
+    model = _get_solar_model()
     
     prompt = """당신은 문서 분석 전문가입니다. 아래 문서 내용을 보고, 이 문서에서 추출해야 할 핵심 필드를 JSON Schema 형태로 생성하세요.
 
@@ -302,7 +401,7 @@ def auto_detect_schema(parsed_markdown: str) -> dict:
 """ + parsed_markdown[:2000]
     
     response = client.chat.completions.create(
-        model=SOLAR_MODEL,
+        model=model,
         messages=[{"role": "user", "content": prompt}],
         max_tokens=800,
         temperature=0,
@@ -334,57 +433,23 @@ def generate_edu_pack(
     goal: str
 ) -> dict:
     """교육 콘텐츠 패키지 생성 (학습 목표/핵심 개념/퀴즈/플래시카드 등)"""
-    if DEMO_MODE or client is None:
-        # Demo mode: return a helpful, schema-shaped placeholder so the UI flow works end-to-end
-        # without external API calls.
-        title = ""
-        if isinstance(extracted_data, dict):
-            title = str(extracted_data.get("title") or extracted_data.get("document_type") or "")
-        title = title.strip()
-
-        key_concepts: list[str] = []
-        if title:
-            key_concepts.append(title)
-
-        if isinstance(extracted_data, dict):
-            for k, v in extracted_data.items():
-                if k in {"mode", "raw"}:
-                    continue
-                v_str = str(v or "").strip()
-                if not v_str:
-                    continue
-                # Avoid dumping long strings into the UI.
-                if len(v_str) > 40:
-                    v_str = v_str[:37] + "..."
-                candidate = v_str
-                if candidate and candidate not in key_concepts:
-                    key_concepts.append(candidate)
-                if len(key_concepts) >= 6:
-                    break
-
-        if not key_concepts:
-            key_concepts = ["문서 구조", "핵심 개념", "용어 정리"]
-
-        demo_summary = (
-            "Demo mode: learning pack generation is stubbed. "
-            "Configure UPSTAGE_API_KEY to enable real generation."
-        )
-
+    # Demo mode: simple deterministic output (no network call).
+    if _is_demo_mode():
         return {
             "learning_objectives": [
-                "문서의 목적과 핵심 내용을 파악한다",
-                "핵심 용어/개념을 정리한다",
+                "문서의 핵심을 이해한다",
+                "추출된 필드를 기준으로 내용을 구조화한다",
                 "문서 기반 질문에 답할 수 있다",
             ],
-            "key_concepts": key_concepts,
-            "summary": demo_summary,
-            "quiz": [{"question": "이 문서의 핵심 주제는 무엇인가요?", "answer": title or "문서 내용을 기반으로 정리합니다."}],
-            "flashcards": [{"front": "핵심 개념", "back": ", ".join(key_concepts[:3])}],
-            "activities": [
-                "문서에서 중요한 문장을 3개 선택해 근거와 함께 정리하기",
-                "핵심 개념 3개를 예시와 함께 설명하기",
-            ],
+            "key_concepts": (extracted_data.get("document_type") and [str(extracted_data.get("document_type"))]) or [],
+            "summary": str(extracted_data.get("key_content") or "")[:220],
+            "quiz": [],
+            "flashcards": [],
+            "activities": [],
         }
+
+    client = _get_upstage_client()
+    model = _get_solar_model()
 
     prompt = f"""당신은 교육 콘텐츠 설계 전문가입니다. 아래 문서 내용과 추출 정보를 바탕으로 교육용 패키지를 JSON으로만 출력하세요.
 
@@ -414,7 +479,7 @@ def generate_edu_pack(
 """
 
     response = client.chat.completions.create(
-        model=SOLAR_MODEL,
+        model=model,
         messages=[{"role": "user", "content": prompt}],
         max_tokens=1000,
         temperature=0.2,
@@ -436,8 +501,16 @@ def generate_edu_pack(
 
 
 def _get_doc(doc_id: str) -> dict:
-    if doc_id not in doc_store:
+    if not doc_store:
         raise HTTPException(400, "먼저 문서를 업로드해주세요.")
+
+    # Backward-compat alias: "current" means "most recently analyzed document".
+    if not doc_id or doc_id == "current":
+        last_key = next(reversed(doc_store))
+        return doc_store[last_key]
+
+    if doc_id not in doc_store:
+        raise HTTPException(400, "문서를 찾을 수 없습니다. 다시 업로드해주세요.")
     return doc_store[doc_id]
 
 
@@ -455,6 +528,161 @@ def _parse_tags(tag_text: str) -> list:
             tags.append(t)
             seen.add(t)
     return tags[:12]
+
+
+def _extract_pdf_text_local(file_bytes: bytes, max_pages: int = 3, max_chars: int = 8000) -> tuple[str, int]:
+    """Best-effort PDF text extraction for demo mode (no network calls)."""
+    try:
+        from pypdf import PdfReader
+    except Exception:
+        return "", 0
+
+    try:
+        reader = PdfReader(io.BytesIO(file_bytes))
+        page_count = len(reader.pages)
+        chunks: list[str] = []
+        for i in range(min(page_count, max_pages)):
+            try:
+                chunks.append(reader.pages[i].extract_text() or "")
+            except Exception:
+                continue
+        text = "\n".join(chunks).strip()
+        if len(text) > max_chars:
+            text = text[:max_chars]
+        return text, page_count
+    except Exception:
+        return "", 0
+
+
+def _demo_document_parse(file_bytes: bytes, filename: str) -> dict:
+    """Demo-mode local 'parse' so reviewers can run end-to-end without an API key."""
+    suffix = Path(filename).suffix.lower()
+    stem = Path(filename).stem or "document"
+
+    if suffix == ".pdf":
+        extracted_text, pages = _extract_pdf_text_local(file_bytes)
+        if extracted_text:
+            md = f"# {stem}\n\n## Extracted Text (Local)\n\n{extracted_text}\n"
+        else:
+            md = (
+                f"# {stem}\n\n"
+                "## Note\n\n"
+                "텍스트를 추출하지 못했습니다. (스캔 PDF/이미지 기반 PDF일 수 있습니다)\n"
+                "데모 모드에서는 OCR을 수행하지 않습니다.\n"
+            )
+        return {"markdown": md, "elements": [], "pages": pages or 1}
+
+    # Images (png/jpg/tiff): no OCR in demo mode
+    return {
+        "markdown": f"# {stem}\n\n이미지 파일이 업로드되었습니다. 데모 모드에서는 OCR을 수행하지 않습니다.\n",
+        "elements": [],
+        "pages": 1,
+    }
+
+
+def _demo_information_extract(parsed_markdown: str, filename: str, schema: dict) -> dict:
+    plain = re.sub(r"[#>*_`]+", " ", parsed_markdown or "")
+    plain = re.sub(r"\\s+", " ", plain).strip()
+
+    stem = Path(filename).stem or "document"
+    title = stem
+    for line in (parsed_markdown or "").splitlines():
+        if line.startswith("#"):
+            title = line.lstrip("#").strip() or title
+            break
+
+    def find_first(patterns: list[str]) -> str:
+        for pat in patterns:
+            m = re.search(pat, plain, flags=re.IGNORECASE)
+            if m:
+                return m.group(0).strip()
+        return ""
+
+    date = find_first(
+        [
+            r"\\b20\\d{2}[./-]\\d{1,2}[./-]\\d{1,2}\\b",
+            r"\\b20\\d{2}년\\s*\\d{1,2}월\\s*\\d{1,2}일\\b",
+        ]
+    )
+    amounts = find_first(
+        [
+            r"(?:₩|\\$|USD|KRW)\\s*\\d{1,3}(?:,\\d{3})+(?:\\.\\d+)?",
+            r"\\b\\d{1,3}(?:,\\d{3})+(?:\\.\\d+)?\\b",
+        ]
+    )
+
+    lowered = plain.lower()
+    if any(k in lowered for k in ["invoice", "영수증", "청구", "견적"]):
+        doc_type = "청구/정산 문서"
+    elif any(k in lowered for k in ["계약", "agreement", "nda"]):
+        doc_type = "계약 문서"
+    elif any(k in lowered for k in ["학습", "lecture", "course", "교육"]):
+        doc_type = "학습 자료"
+    else:
+        doc_type = "일반 문서"
+
+    key_content = plain[:280] + ("..." if len(plain) > 280 else "")
+    data = {
+        "document_type": doc_type,
+        "title": title,
+        "date": date,
+        "author_or_issuer": "DocuAgent Demo",
+        "key_content": key_content,
+        "amounts_or_numbers": amounts,
+    }
+
+    props = schema.get("properties") if isinstance(schema, dict) else None
+    if isinstance(props, dict) and props:
+        # keep only schema keys, but fill missing ones with empty string for UI stability
+        return {k: str(data.get(k, "")) for k in props.keys()}
+
+    return data
+
+
+def _demo_summary(extracted: dict) -> str:
+    doc_type = str(extracted.get("document_type") or "-")
+    title = str(extracted.get("title") or "-")
+    date = str(extracted.get("date") or "-")
+    key = str(extracted.get("key_content") or "").strip()
+    key_line = key[:180] + ("..." if len(key) > 180 else "")
+    lines = [
+        f"문서 유형: {doc_type}",
+        f"제목: {title}",
+        f"날짜: {date}",
+    ]
+    if key_line:
+        lines.append(f"핵심: {key_line}")
+    return "\n".join(lines[:5]).strip()
+
+
+def _demo_chat_answer(doc: dict, question: str) -> str:
+    q = (question or "").strip()
+    if not q:
+        return "질문을 입력해주세요."
+
+    q_lower = q.lower()
+    if "요약" in q or "summary" in q_lower:
+        return str(doc.get("summary") or "")
+
+    extracted = doc.get("extracted_data", {}) or {}
+    aliases = {
+        "title": ["제목", "타이틀", "title"],
+        "date": ["날짜", "일자", "date"],
+        "document_type": ["문서 유형", "문서종류", "type", "doctype"],
+        "author_or_issuer": ["작성자", "발행자", "issuer", "author"],
+        "amounts_or_numbers": ["금액", "수치", "amount", "number"],
+        "key_content": ["핵심", "내용", "요점", "key"],
+    }
+    for field, keys in aliases.items():
+        if any(k.lower() in q_lower for k in keys):
+            val = extracted.get(field)
+            if val:
+                return f"{field}: {val}"
+
+    return (
+        "데모 모드에서는 LLM 호출 없이 규칙 기반 답변만 제공합니다.\n"
+        "UPSTAGE_API_KEY를 설정하면 Solar 기반 Q&A가 동작합니다."
+    )
 
 
 def _export_html(doc: dict) -> str:
@@ -582,9 +810,8 @@ def _build_scorm_zip(doc: dict) -> bytes:
 
 
 def _build_imscc_zip(doc: dict) -> bytes:
-    title = html.escape(doc.get("filename", "DocuAgent 결과"))
     html_body = _export_html(doc)
-    manifest = f"""<?xml version="1.0" encoding="UTF-8"?>
+    manifest = """<?xml version="1.0" encoding="UTF-8"?>
 <manifest identifier="MANIFEST-IMSCC"
   xmlns="http://www.imsglobal.org/xsd/imscp_v1p1"
   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
@@ -724,6 +951,20 @@ def _build_imscc13_zip(doc: dict) -> bytes:
 
 # ─── API Endpoints ───
 
+@app.get("/healthz")
+async def healthz() -> dict:
+    converter = "pdftoppm" if shutil.which("pdftoppm") else "pypdfium2"
+    key = _get_upstage_api_key()
+    return {
+        "status": "ok",
+        "demo_mode": _is_demo_mode(),
+        "upstage_key_configured": bool(key) and key.lower() not in {"your_api_key_here", "change_me"},
+        "pdf_converter": converter,
+        "max_upload_bytes": MAX_UPLOAD_BYTES,
+        "version": app.version,
+    }
+
+
 @app.post("/api/analyze")
 async def analyze_document(
     file: UploadFile = File(...),
@@ -735,18 +976,34 @@ async def analyze_document(
     
     file_bytes = await file.read()
     filename = file.filename or "document.pdf"
+
+    if not file_bytes:
+        raise HTTPException(400, "빈 파일입니다.")
+    if len(file_bytes) > MAX_UPLOAD_BYTES:
+        raise HTTPException(413, f"파일이 너무 큽니다. (최대 {MAX_UPLOAD_BYTES} bytes)")
+
+    demo_mode = _is_demo_mode()
     
     # Step 1: Document Parse
-    parsed = call_document_parse(file_bytes, filename)
+    if demo_mode:
+        parsed = _demo_document_parse(file_bytes, filename)
+    else:
+        parsed = call_document_parse(file_bytes, filename)
     
     # Step 2: Solar로 스키마 자동 생성
     schema = auto_detect_schema(parsed["markdown"])
     
     # Step 3: Information Extract
-    extracted = call_information_extract(file_bytes, filename, schema)
+    if demo_mode:
+        extracted = _demo_information_extract(parsed["markdown"], filename, schema)
+    else:
+        extracted = call_information_extract(file_bytes, filename, schema)
     
     # Step 4: Solar로 문서 요약 생성
-    summary_prompt = f"""아래 문서 내용과 추출된 정보를 바탕으로 한국어로 간결한 분석 요약을 작성하세요.
+    if demo_mode:
+        summary = _demo_summary(extracted)
+    else:
+        summary_prompt = f"""아래 문서 내용과 추출된 정보를 바탕으로 한국어로 간결한 분석 요약을 작성하세요.
 
 [파싱된 문서 내용]
 {parsed['markdown'][:3000]}
@@ -755,19 +1012,19 @@ async def analyze_document(
 {json.dumps(extracted, ensure_ascii=False, indent=2)}
 
 요약은 3~5줄로 핵심만 작성하세요."""
-    
-    summary = call_solar_chat(
-        "당신은 문서 분석 도우미입니다. 정확하고 간결하게 답변합니다.",
-        summary_prompt
-    )
+
+        summary = call_solar_chat(
+            "당신은 문서 분석 도우미입니다. 정확하고 간결하게 답변합니다.",
+            summary_prompt,
+        )
 
     # 교육 콘텐츠 패키지 생성
     edu_pack = generate_edu_pack(parsed["markdown"], extracted, audience, goal)
     tag_list = _parse_tags(tags)
     
     # 저장
-    doc_id = "current"
-    doc_store[doc_id] = {
+    doc_id = secrets.token_urlsafe(8)
+    doc = {
         "filename": filename,
         "parsed_markdown": parsed["markdown"],
         "extracted_data": extracted,
@@ -777,11 +1034,14 @@ async def analyze_document(
         "chat_history": [],
         "audience": audience,
         "goal": goal,
-        "tags": tag_list
+        "tags": tag_list,
+        "mode": "demo" if demo_mode else "live",
     }
+    _put_doc(doc_id, doc)
     
     return {
         "doc_id": doc_id,
+        "demo_mode": demo_mode,
         "filename": filename,
         "pages": parsed["pages"],
         "parsed_markdown": parsed["markdown"],
@@ -801,6 +1061,12 @@ async def chat_with_document(
 ):
     """문서 기반 Q&A — Solar"""
     doc = _get_doc(doc_id)
+
+    if doc.get("mode") == "demo":
+        answer = _demo_chat_answer(doc, question)
+        doc["chat_history"].append({"role": "user", "content": question})
+        doc["chat_history"].append({"role": "assistant", "content": answer})
+        return {"answer": answer}
     
     system_prompt = f"""당신은 DocuAgent 문서 분석 도우미입니다.
 아래 문서 내용과 추출된 정보를 참고하여 사용자의 질문에 정확히 답변하세요.

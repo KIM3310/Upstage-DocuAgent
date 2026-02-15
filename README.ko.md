@@ -32,21 +32,29 @@ DocuAgent는 문서를 업로드하면 구조화, 핵심 정보 추출, 요약, 
 pip install -r requirements.txt
 ```
 
-### 2) API 키 설정
+### 2) 데모 모드 실행 (API 키 없이)
+리뷰어가 비용/키 없이도 UI를 끝까지 체험할 수 있도록 데모 모드를 제공합니다.
+```
+DOCUAGENT_DEMO_MODE=1 python main.py
+```
+
+### 3) 라이브 모드 실행 (Upstage API)
 ```
 export UPSTAGE_API_KEY="your_api_key_here"
 ```
 또는 .env 파일 사용
 키를 설정하지 않으면 **데모 모드(스텁 출력)**로 동작하여, 외부 API 없이도 UI 흐름을 끝까지 확인할 수 있습니다.
 
-### 3) 실행
+### 4) 접속
 ```
 python main.py
 ```
 브라우저에서 http://localhost:8000 접속
+헬스 체크: http://localhost:8000/healthz
 
 ## 사용 방법
 1) 문서 업로드
+   - 또는 UI에서 샘플 버튼(KO/EN)으로 바로 실행
 2) 학습자 수준/학습 목표 선택
 3) LOM 태그 입력(선택)
 4) 분석 완료 후 결과 확인
@@ -72,4 +80,11 @@ python main.py
 - LMS_IMPORT_LOG_TEMPLATE.md: 이슈 기록 템플릿
 
 ## 참고
-- PDF 입력은 poppler(pdftoppm) 또는 pypdfium2+pillow가 필요합니다.
+- PDF 입력은 poppler(pdftoppm) 우선, 미설치 환경은 pypdfium2 + Pillow 경로를 사용합니다.
+- 데모 모드는 pypdf 기반의 로컬 텍스트 추출을 사용하며 OCR은 수행하지 않습니다.
+
+## 개발 / 테스트
+```
+pip install -r requirements-dev.txt
+pytest -q
+```

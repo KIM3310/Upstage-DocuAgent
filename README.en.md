@@ -32,21 +32,29 @@ DocuAgent parses documents, extracts key data, generates summaries and learning 
 pip install -r requirements.txt
 ```
 
-### 2) Set API key
+### 2) Run (Demo mode, no API key)
+DocuAgent can run end-to-end without paid keys so reviewers can try the full UI locally.
+```
+DOCUAGENT_DEMO_MODE=1 python main.py
+```
+
+### 3) Run (Live mode, Upstage API)
 ```
 export UPSTAGE_API_KEY="your_api_key_here"
 ```
 Or use .env
 If you skip the key, DocuAgent runs in **demo mode** (stubbed outputs) so you can still try the UI end-to-end.
 
-### 3) Run
+### 4) Open UI
 ```
 python main.py
 ```
 Open http://localhost:8000
+Health check: http://localhost:8000/healthz
 
 ## Usage
 1) Upload a document
+   - Or click the sample buttons (KO/EN) on the UI
 2) Select audience level and learning goal
 3) Enter LOM tags (optional)
 4) Review results
@@ -72,4 +80,11 @@ Open http://localhost:8000
 - LMS_IMPORT_LOG_TEMPLATE.md: issue log template
 
 ## Notes
-- PDF input requires poppler (pdftoppm) or pypdfium2+pillow for conversion.
+- PDF input: poppler (pdftoppm) is preferred. If not available, pypdfium2 + Pillow are used.
+- Demo mode uses best-effort local PDF text extraction via pypdf (no OCR).
+
+## Dev / Tests
+```
+pip install -r requirements-dev.txt
+pytest -q
+```
