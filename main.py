@@ -158,11 +158,7 @@ def _extract_json(content: str) -> Optional[dict]:
 def call_document_parse(file_bytes: bytes, filename: str) -> dict:
     """Step 1 (Live): Document Parse — 문서를 구조화된 마크다운으로 변환"""
     if _is_demo_mode():
-        raise HTTPException(
-            400,
-            "Demo mode is enabled (no external API calls). "
-            "Set UPSTAGE_API_KEY and unset DOCUAGENT_DEMO_MODE to run live parsing.",
-        )
+        return _demo_document_parse(file_bytes, filename)
 
     api_key = _get_upstage_api_key()
     if not api_key:
@@ -198,11 +194,15 @@ def call_document_parse(file_bytes: bytes, filename: str) -> dict:
 def call_information_extract(file_bytes: bytes, filename: str, schema: dict) -> dict:
     """Step 2 (Live): Information Extract — 문서에서 구조화된 데이터 추출"""
     if _is_demo_mode():
-        raise HTTPException(
-            400,
-            "Demo mode is enabled (no external API calls). "
-            "Set UPSTAGE_API_KEY and unset DOCUAGENT_DEMO_MODE to run live extraction.",
-        )
+        props = schema.get("properties") if isinstance(schema, dict) else None
+        if isinstance(props, dict) and props:
+            extracted = {str(k): "" for k in props.keys()}
+        else:
+            extracted = {}
+        if "title" in extracted and not extracted["title"]:
+            extracted["title"] = Path(filename or "document").stem
+        extracted.setdefault("mode", "demo")
+        return extracted
 
     api_key = _get_upstage_api_key()
     if not api_key:
@@ -336,10 +336,9 @@ def _pdf_to_png_bytes(file_bytes: bytes) -> bytes:
 def call_solar_chat(system_prompt: str, user_message: str, history: list = None) -> str:
     """Solar — 문서 기반 Q&A"""
     if _is_demo_mode():
-        raise HTTPException(
-            400,
-            "Demo mode is enabled (no external API calls). "
-            "Set UPSTAGE_API_KEY and unset DOCUAGENT_DEMO_MODE to use Solar.",
+        return (
+            "Demo mode: Solar responses are stubbed. "
+            "Configure UPSTAGE_API_KEY to enable real generation."
         )
 
     client = _get_upstage_client()
@@ -433,19 +432,59 @@ def generate_edu_pack(
     goal: str
 ) -> dict:
     """교육 콘텐츠 패키지 생성 (학습 목표/핵심 개념/퀴즈/플래시카드 등)"""
-    # Demo mode: simple deterministic output (no network call).
+    # Demo mode: return a helpful placeholder so the UI flow works end-to-end
+    # without external API calls.
     if _is_demo_mode():
+        title = ""
+        if isinstance(extracted_data, dict):
+            title = str(extracted_data.get("title") or extracted_data.get("document_type") or "")
+        title = title.strip()
+
+        key_concepts: list[str] = []
+        if title:
+            key_concepts.append(title)
+
+        if isinstance(extracted_data, dict):
+            for k, v in extracted_data.items():
+                if k in {"mode", "raw"}:
+                    continue
+                v_str = str(v or "").strip()
+                if not v_str:
+                    continue
+                if len(v_str) > 40:
+                    v_str = v_str[:37] + "..."
+                if v_str and v_str not in key_concepts:
+                    key_concepts.append(v_str)
+                if len(key_concepts) >= 6:
+                    break
+
+        if not key_concepts:
+            key_concepts = ["문서 구조", "핵심 개념", "용어 정리"]
+
+        demo_summary = (
+            "Demo mode: learning pack generation is stubbed. "
+            "Configure UPSTAGE_API_KEY to enable real generation."
+        )
+
         return {
             "learning_objectives": [
-                "문서의 핵심을 이해한다",
-                "추출된 필드를 기준으로 내용을 구조화한다",
+                "문서의 목적과 핵심 내용을 파악한다",
+                "핵심 용어/개념을 정리한다",
                 "문서 기반 질문에 답할 수 있다",
             ],
-            "key_concepts": (extracted_data.get("document_type") and [str(extracted_data.get("document_type"))]) or [],
-            "summary": str(extracted_data.get("key_content") or "")[:220],
-            "quiz": [],
-            "flashcards": [],
-            "activities": [],
+            "key_concepts": key_concepts,
+            "summary": demo_summary,
+            "quiz": [
+                {
+                    "question": "이 문서의 핵심 주제는 무엇인가요?",
+                    "answer": title or "문서 내용을 기반으로 정리합니다.",
+                }
+            ],
+            "flashcards": [{"front": "핵심 개념", "back": ", ".join(key_concepts[:3])}],
+            "activities": [
+                "문서에서 중요한 문장을 3개 선택해 근거와 함께 정리하기",
+                "핵심 개념 3개를 예시와 함께 설명하기",
+            ],
         }
 
     client = _get_upstage_client()
@@ -562,11 +601,19 @@ def _demo_document_parse(file_bytes: bytes, filename: str) -> dict:
     if suffix == ".pdf":
         extracted_text, pages = _extract_pdf_text_local(file_bytes)
         if extracted_text:
-            md = f"# {stem}\n\n## Extracted Text (Local)\n\n{extracted_text}\n"
+            md = (
+                "# Demo Document Parse\n\n"
+                f"**Filename:** {html.escape(filename or 'document')}\n\n"
+                f"## {stem}\n\n"
+                "### Extracted Text (Local)\n\n"
+                f"{extracted_text}\n"
+            )
         else:
             md = (
-                f"# {stem}\n\n"
-                "## Note\n\n"
+                "# Demo Document Parse\n\n"
+                f"**Filename:** {html.escape(filename or 'document')}\n\n"
+                f"## {stem}\n\n"
+                "### Note\n\n"
                 "텍스트를 추출하지 못했습니다. (스캔 PDF/이미지 기반 PDF일 수 있습니다)\n"
                 "데모 모드에서는 OCR을 수행하지 않습니다.\n"
             )
@@ -574,7 +621,12 @@ def _demo_document_parse(file_bytes: bytes, filename: str) -> dict:
 
     # Images (png/jpg/tiff): no OCR in demo mode
     return {
-        "markdown": f"# {stem}\n\n이미지 파일이 업로드되었습니다. 데모 모드에서는 OCR을 수행하지 않습니다.\n",
+        "markdown": (
+            "# Demo Document Parse\n\n"
+            f"**Filename:** {html.escape(filename or 'document')}\n\n"
+            f"## {stem}\n\n"
+            "이미지 파일이 업로드되었습니다. 데모 모드에서는 OCR을 수행하지 않습니다.\n"
+        ),
         "elements": [],
         "pages": 1,
     }
@@ -582,7 +634,7 @@ def _demo_document_parse(file_bytes: bytes, filename: str) -> dict:
 
 def _demo_information_extract(parsed_markdown: str, filename: str, schema: dict) -> dict:
     plain = re.sub(r"[#>*_`]+", " ", parsed_markdown or "")
-    plain = re.sub(r"\\s+", " ", plain).strip()
+    plain = re.sub(r"\s+", " ", plain).strip()
 
     stem = Path(filename).stem or "document"
     title = stem
@@ -600,14 +652,14 @@ def _demo_information_extract(parsed_markdown: str, filename: str, schema: dict)
 
     date = find_first(
         [
-            r"\\b20\\d{2}[./-]\\d{1,2}[./-]\\d{1,2}\\b",
-            r"\\b20\\d{2}년\\s*\\d{1,2}월\\s*\\d{1,2}일\\b",
+            r"\b20\d{2}[./-]\d{1,2}[./-]\d{1,2}\b",
+            r"\b20\d{2}년\s*\d{1,2}월\s*\d{1,2}일\b",
         ]
     )
     amounts = find_first(
         [
-            r"(?:₩|\\$|USD|KRW)\\s*\\d{1,3}(?:,\\d{3})+(?:\\.\\d+)?",
-            r"\\b\\d{1,3}(?:,\\d{3})+(?:\\.\\d+)?\\b",
+            r"(?:₩|\$|USD|KRW)\s*\d{1,3}(?:,\d{3})+(?:\.\d+)?",
+            r"\b\d{1,3}(?:,\d{3})+(?:\.\d+)?\b",
         ]
     )
 
