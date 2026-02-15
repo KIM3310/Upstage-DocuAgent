@@ -15,7 +15,7 @@ If not, it runs in **demo mode** (stubbed outputs) so the end-to-end flow is sti
 2. Configure environment:
    - Copy `.env.example` to `.env` (optional)
    - Optional: set `UPSTAGE_API_KEY` to enable real API calls
-   - Optional: force demo mode with `DOCUAGENT_MODE=demo`
+   - Optional: force demo mode with `DOCUAGENT_MODE=demo` or `DOCUAGENT_DEMO_MODE=1`
 
 ## Run
 ```bash
@@ -25,6 +25,7 @@ Open `http://localhost:8000`.
 
 ## Health Check
 - `GET /` should render the UI.
+- `GET /healthz` should return JSON status (`demo_mode`, `pdf_converter`, etc).
 - `GET /docs` should show FastAPI docs.
 
 ## Demo Script (3 minutes)

@@ -1,14 +1,21 @@
 .SHELLFLAGS := -eu -o pipefail -c
 PYTHON ?= python3
 
-.PHONY: install run ci
+.PHONY: install dev run run-demo ci
 
 install:
 	$(PYTHON) -m pip install -r requirements.txt
 
+dev: install
+	$(PYTHON) -m pip install -r requirements-dev.txt
+
 run:
 	$(PYTHON) main.py
 
-ci: install
-	$(PYTHON) -m compileall .
-	$(PYTHON) -m unittest discover -s tests -p 'test_*.py'
+run-demo:
+	DOCUAGENT_DEMO_MODE=1 $(PYTHON) main.py
+
+ci: dev
+	$(PYTHON) -m compileall -q main.py
+	ruff check --select F .
+	pytest -q
