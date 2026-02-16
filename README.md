@@ -8,6 +8,11 @@ DocuAgent is a document analysis service that turns an upload into:
 - Learning content (objectives, quiz, flashcards, activities)
 - LMS-ready exports (SCORM / IMS CC)
 
+## My Scope (Personal Project)
+- Built the end-to-end pipeline: document parse -> schema generation -> JSON extraction -> learning pack -> LMS export.
+- Added demo-first reproducibility (runs end-to-end without paid keys via `DOCUAGENT_DEMO_MODE=1`).
+- Hardened structured outputs (best-effort JSON extraction + safe fallbacks) and export edge cases (minimal, standards-compliant manifests).
+
 ## Docs
 - English: `README.en.md`
 - 한국어: `README.ko.md`
@@ -55,3 +60,7 @@ ruff check --select F .
 pytest -q
 ```
 
+## Glossary (first-time readers)
+- LMS: Learning Management System
+- SCORM: Sharable Content Object Reference Model
+- IMS CC: IMS Common Cartridge
