@@ -570,6 +570,19 @@ def _get_doc(doc_id: str) -> dict:
     return doc_store[doc_id]
 
 
+def _doc_summary(doc_id: str, doc: dict) -> dict:
+    return {
+        "doc_id": doc_id,
+        "filename": str(doc.get("filename", "")),
+        "created_at_utc": str(doc.get("created_at_utc", "")),
+        "pages": int(doc.get("pages", 0) or 0),
+        "mode": str(doc.get("mode", "demo")),
+        "audience": str(doc.get("audience", "")),
+        "goal": str(doc.get("goal", "")),
+        "tags": list(doc.get("tags", []) or []),
+    }
+
+
 def _parse_tags(tag_text: str) -> list:
     if not tag_text:
         return []
@@ -1095,6 +1108,7 @@ async def analyze_document(
     doc_id = secrets.token_urlsafe(8)
     doc = {
         "filename": filename,
+        "created_at_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "parsed_markdown": parsed["markdown"],
         "extracted_data": extracted,
         "summary": summary,
@@ -1120,6 +1134,25 @@ async def analyze_document(
         "audience": audience,
         "goal": goal,
         "tags": tag_list
+    }
+
+
+@app.get("/api/docs")
+async def list_docs(
+    limit: int = 20,
+    offset: int = 0,
+):
+    safe_limit = max(1, min(int(limit), 100))
+    safe_offset = max(0, int(offset))
+
+    doc_items = list(reversed(doc_store.items()))
+    page = doc_items[safe_offset : safe_offset + safe_limit]
+    items = [_doc_summary(doc_id, doc) for doc_id, doc in page]
+    return {
+        "total": len(doc_items),
+        "limit": safe_limit,
+        "offset": safe_offset,
+        "items": items,
     }
 
 

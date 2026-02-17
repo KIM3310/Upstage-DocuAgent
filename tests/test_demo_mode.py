@@ -53,6 +53,13 @@ def test_demo_analyze_chat_and_exports(monkeypatch) -> None:
     assert doc_id
     assert "summary" in payload
 
+    # Document listing should include newly analyzed docs for UI selectors.
+    docs_res = client.get("/api/docs", params={"limit": 10, "offset": 0})
+    assert docs_res.status_code == 200, docs_res.text
+    docs_payload = docs_res.json()
+    assert docs_payload["total"] >= 1
+    assert any(item["doc_id"] == doc_id for item in docs_payload["items"])
+
     # Chat should work in demo mode (rule-based response).
     r2 = client.post("/api/chat", data={"question": "요약 보여줘", "doc_id": doc_id})
     assert r2.status_code == 200, r2.text
