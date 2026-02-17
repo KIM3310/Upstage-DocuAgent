@@ -47,8 +47,25 @@ _load_env()
 DEFAULT_UPSTAGE_BASE_URL = "https://api.upstage.ai/v1"
 DEFAULT_SOLAR_MODEL = "solar-pro2"
 
-MAX_UPLOAD_BYTES = int(os.getenv("DOCUAGENT_MAX_UPLOAD_BYTES", str(20 * 1024 * 1024)))
-MAX_DOCS_IN_MEMORY = int(os.getenv("DOCUAGENT_MAX_DOCS", "25"))
+
+def _read_int_env(name: str, default: int, *, minimum: int, maximum: int) -> int:
+    raw = (os.getenv(name) or "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return max(minimum, min(maximum, value))
+
+
+MAX_UPLOAD_BYTES = _read_int_env(
+    "DOCUAGENT_MAX_UPLOAD_BYTES",
+    20 * 1024 * 1024,
+    minimum=1024,
+    maximum=200 * 1024 * 1024,
+)
+MAX_DOCS_IN_MEMORY = _read_int_env("DOCUAGENT_MAX_DOCS", 25, minimum=1, maximum=500)
 
 
 def _truthy(value: Optional[str]) -> bool:

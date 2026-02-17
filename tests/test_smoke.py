@@ -17,6 +17,26 @@ class TestSmoke(unittest.TestCase):
 
         self.assertIsNone(main._extract_json("not json"))
 
+    def test_read_int_env_is_resilient_and_bounded(self):
+        import os
+        import main
+
+        old = os.environ.get("DOCUAGENT_MAX_DOCS")
+        try:
+            os.environ["DOCUAGENT_MAX_DOCS"] = "not-a-number"
+            self.assertEqual(main._read_int_env("DOCUAGENT_MAX_DOCS", 25, minimum=1, maximum=500), 25)
+
+            os.environ["DOCUAGENT_MAX_DOCS"] = "-10"
+            self.assertEqual(main._read_int_env("DOCUAGENT_MAX_DOCS", 25, minimum=1, maximum=500), 1)
+
+            os.environ["DOCUAGENT_MAX_DOCS"] = "999999"
+            self.assertEqual(main._read_int_env("DOCUAGENT_MAX_DOCS", 25, minimum=1, maximum=500), 500)
+        finally:
+            if old is None:
+                os.environ.pop("DOCUAGENT_MAX_DOCS", None)
+            else:
+                os.environ["DOCUAGENT_MAX_DOCS"] = old
+
     def test_demo_mode_does_not_call_network(self):
         import os
         import importlib
