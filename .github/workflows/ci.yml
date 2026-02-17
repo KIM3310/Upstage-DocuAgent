@@ -19,6 +19,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt -r requirements-dev.txt
 
+      - name: Dependency check
+        run: python -m pip check
+
       - name: Compile
         run: python -m compileall -q main.py
 
@@ -27,4 +30,3 @@ jobs:
 
       - name: Pytest
         run: pytest -q
-
