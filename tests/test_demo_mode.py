@@ -65,6 +65,19 @@ def test_demo_analyze_chat_and_exports(monkeypatch) -> None:
     assert r2.status_code == 200, r2.text
     assert r2.json().get("answer")
 
+    too_long = "가" * (appmod.MAX_CHAT_QUESTION_CHARS + 1)
+    r2_long = client.post("/api/chat", data={"question": too_long, "doc_id": doc_id})
+    assert r2_long.status_code == 400
+
+    for i in range(appmod.MAX_CHAT_HISTORY_MESSAGES + 6):
+        rr = client.post("/api/chat", data={"question": f"Q{i}", "doc_id": doc_id})
+        assert rr.status_code == 200, rr.text
+
+    history = appmod.doc_store[doc_id]["chat_history"]
+    assert len(history) <= appmod.MAX_CHAT_HISTORY_MESSAGES
+    assert history[-2]["role"] == "user"
+    assert history[-1]["role"] == "assistant"
+
     # Exports should be valid ZIPs.
     r3 = client.get("/api/export/scorm", params={"doc_id": doc_id})
     assert r3.status_code == 200, r3.text

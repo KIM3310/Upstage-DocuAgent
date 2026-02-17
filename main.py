@@ -66,6 +66,18 @@ MAX_UPLOAD_BYTES = _read_int_env(
     maximum=200 * 1024 * 1024,
 )
 MAX_DOCS_IN_MEMORY = _read_int_env("DOCUAGENT_MAX_DOCS", 25, minimum=1, maximum=500)
+MAX_CHAT_HISTORY_MESSAGES = _read_int_env(
+    "DOCUAGENT_MAX_CHAT_HISTORY_MESSAGES",
+    40,
+    minimum=2,
+    maximum=400,
+)
+MAX_CHAT_QUESTION_CHARS = _read_int_env(
+    "DOCUAGENT_MAX_CHAT_QUESTION_CHARS",
+    1000,
+    minimum=16,
+    maximum=20000,
+)
 
 
 def _truthy(value: Optional[str]) -> bool:
@@ -568,6 +580,26 @@ def _get_doc(doc_id: str) -> dict:
     if doc_id not in doc_store:
         raise HTTPException(400, "문서를 찾을 수 없습니다. 다시 업로드해주세요.")
     return doc_store[doc_id]
+
+
+def _normalize_chat_question(question: str) -> str:
+    safe_question = str(question or "").strip()
+    if not safe_question:
+        raise HTTPException(400, "질문을 입력해주세요.")
+    if len(safe_question) > MAX_CHAT_QUESTION_CHARS:
+        raise HTTPException(400, f"질문이 너무 깁니다. {MAX_CHAT_QUESTION_CHARS}자 이하로 입력해주세요.")
+    return safe_question
+
+
+def _append_chat_exchange(doc: dict, question: str, answer: str) -> None:
+    history = doc.get("chat_history")
+    if not isinstance(history, list):
+        history = []
+    history.append({"role": "user", "content": question})
+    history.append({"role": "assistant", "content": answer})
+    if len(history) > MAX_CHAT_HISTORY_MESSAGES:
+        history = history[-MAX_CHAT_HISTORY_MESSAGES:]
+    doc["chat_history"] = history
 
 
 def _doc_summary(doc_id: str, doc: dict) -> dict:
@@ -1163,11 +1195,11 @@ async def chat_with_document(
 ):
     """문서 기반 Q&A — Solar"""
     doc = _get_doc(doc_id)
+    safe_question = _normalize_chat_question(question)
 
     if doc.get("mode") == "demo":
-        answer = _demo_chat_answer(doc, question)
-        doc["chat_history"].append({"role": "user", "content": question})
-        doc["chat_history"].append({"role": "assistant", "content": answer})
+        answer = _demo_chat_answer(doc, safe_question)
+        _append_chat_exchange(doc, safe_question, answer)
         return {"answer": answer}
     
     system_prompt = f"""당신은 DocuAgent 문서 분석 도우미입니다.
@@ -1181,11 +1213,10 @@ async def chat_with_document(
 [추출된 핵심 정보]
 {json.dumps(doc['extracted_data'], ensure_ascii=False, indent=2)}"""
     
-    answer = call_solar_chat(system_prompt, question, doc["chat_history"][-10:])
+    answer = call_solar_chat(system_prompt, safe_question, doc.get("chat_history", [])[-10:])
     
     # 대화 기록 저장
-    doc["chat_history"].append({"role": "user", "content": question})
-    doc["chat_history"].append({"role": "assistant", "content": answer})
+    _append_chat_exchange(doc, safe_question, answer)
     
     return {"answer": answer}
 
