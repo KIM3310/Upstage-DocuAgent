@@ -17,5 +17,5 @@ run-demo:
 
 ci: dev
 	$(PYTHON) -m compileall -q main.py
-	ruff check --select F .
-	pytest -q
+	$(PYTHON) -m ruff check --select F .
+	$(PYTHON) -m pytest -q
