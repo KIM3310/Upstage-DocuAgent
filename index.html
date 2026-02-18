@@ -378,6 +378,68 @@ body::after {
 .chat-input-area button:hover { transform:translateY(-1px); filter:brightness(1.05); }
 .chat-input-area button:disabled { opacity:0.4; cursor:not-allowed; }
 
+.community-panel {
+  border-top:1px solid var(--border);
+  padding:14px 24px;
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+  background:rgba(14, 15, 28, 0.82);
+}
+.community-title {
+  font-size:12px;
+  font-weight:600;
+  color:var(--accent2);
+  letter-spacing:0.3px;
+}
+.community-grid {
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:8px;
+}
+.community-grid input,
+.community-panel textarea {
+  width:100%;
+  border:1px solid var(--border);
+  border-radius:8px;
+  background:var(--surface2);
+  color:var(--text);
+  padding:8px 10px;
+  font-size:12px;
+}
+.community-panel textarea {
+  min-height:68px;
+  resize:vertical;
+}
+.community-actions {
+  display:flex;
+  gap:8px;
+  align-items:center;
+}
+.community-actions button {
+  padding:9px 12px;
+  border-radius:8px;
+  border:none;
+  background:linear-gradient(135deg, var(--accent-strong), var(--accent2));
+  color:#fff;
+  font-size:12px;
+  font-weight:600;
+  cursor:pointer;
+}
+.community-actions button:disabled {
+  opacity:0.55;
+  cursor:not-allowed;
+}
+.community-status {
+  font-size:11px;
+  color:var(--text2);
+}
+.community-status.error { color:var(--red); }
+.community-hint {
+  font-size:11px;
+  color:var(--text2);
+}
+
 /* Loading */
 .loader {
   display:none; padding:24px; text-align:center;
@@ -598,6 +660,21 @@ body::after {
       <input type="text" id="chatInput" placeholder="문서에 대해 질문하세요..." disabled>
       <button id="sendBtn" disabled>전송</button>
     </div>
+
+    <div class="community-panel">
+      <div class="community-title">Community Feedback (Formspree)</div>
+      <div class="community-grid">
+        <input id="communityName" placeholder="이름">
+        <input id="communityEmail" type="email" placeholder="이메일">
+      </div>
+      <textarea id="communityMessage" placeholder="DocuAgent에서 개선할 점을 알려주세요."></textarea>
+      <input id="communityEndpoint" placeholder="Formspree endpoint (https://formspree.io/f/...)">
+      <div class="community-actions">
+        <button id="communitySubmit">피드백 전송</button>
+        <div id="communityStatus" class="community-status"></div>
+      </div>
+      <div class="community-hint">엔드포인트는 브라우저 localStorage에 저장됩니다.</div>
+    </div>
   </div>
 </div>
 
@@ -625,12 +702,83 @@ const modeTag = document.getElementById('modeTag');
 const poweredLine = document.getElementById('poweredLine');
 const sampleKo = document.getElementById('sampleKo');
 const sampleEn = document.getElementById('sampleEn');
+const communityName = document.getElementById('communityName');
+const communityEmail = document.getElementById('communityEmail');
+const communityMessage = document.getElementById('communityMessage');
+const communityEndpoint = document.getElementById('communityEndpoint');
+const communitySubmit = document.getElementById('communitySubmit');
+const communityStatus = document.getElementById('communityStatus');
 
 let progressTimers = [];
 let lastAnalysis = null;
 let currentDocId = null;
 let tagSyncTimer = null;
 let currentRecommendations = [];
+
+const COMMUNITY_ENDPOINT_KEY = 'docuagent_formspree_endpoint';
+if (communityEndpoint) {
+  const saved = localStorage.getItem(COMMUNITY_ENDPOINT_KEY) || '';
+  communityEndpoint.value = saved;
+  communityEndpoint.addEventListener('change', () => {
+    localStorage.setItem(COMMUNITY_ENDPOINT_KEY, communityEndpoint.value.trim());
+  });
+}
+
+function setCommunityStatus(message, isError = false) {
+  if (!communityStatus) return;
+  communityStatus.textContent = message || '';
+  communityStatus.className = isError ? 'community-status error' : 'community-status';
+}
+
+async function submitCommunityFeedback() {
+  if (!communityEndpoint || !communitySubmit) return;
+  const endpoint = String(communityEndpoint.value || '').trim();
+  if (!endpoint) {
+    setCommunityStatus('Formspree endpoint를 입력하세요.', true);
+    return;
+  }
+  const payload = {
+    name: communityName ? String(communityName.value || '').trim() : '',
+    email: communityEmail ? String(communityEmail.value || '').trim() : '',
+    message: communityMessage ? String(communityMessage.value || '').trim() : '',
+    source: 'upstage-docuagent',
+    page_url: window.location.href,
+  };
+  if (!payload.message) {
+    setCommunityStatus('메시지를 입력하세요.', true);
+    return;
+  }
+
+  communitySubmit.disabled = true;
+  setCommunityStatus('전송 중...');
+  try {
+    const resp = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      const msg = (data && data.errors && data.errors[0] && data.errors[0].message) || data.error || '요청 실패';
+      throw new Error(String(msg));
+    }
+    if (communityMessage) {
+      communityMessage.value = '';
+    }
+    setCommunityStatus('피드백 전송 완료');
+  } catch (err) {
+    setCommunityStatus(`전송 실패: ${err?.message || String(err)}`, true);
+  } finally {
+    communitySubmit.disabled = false;
+  }
+}
+
+if (communitySubmit) {
+  communitySubmit.addEventListener('click', submitCommunityFeedback);
+}
 function resetProgressTimers() {
   progressTimers.forEach(clearTimeout);
   progressTimers = [];
