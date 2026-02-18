@@ -37,6 +37,16 @@ Open `http://localhost:8000`
 - Click sample buttons on the UI: `샘플 불러오기 (KO)` / `Sample (EN)`
 - Health check: `http://localhost:8000/healthz`
 
+## AdSense + Cloudflare Pages Prep
+- `index.html` includes review-oriented trust/policy blocks and a sponsored slot placeholder.
+- Replace placeholder values before submit:
+  - `ca-pub-0000000000000000` -> your AdSense publisher id
+  - `1234567890` -> approved ad slot id
+- Crawl helpers are ready at repo root:
+  - `ads.txt`
+  - `robots.txt`
+  - `sitemap.xml`
+
 ## Project Structure
 - `main.py`: FastAPI backend + Upstage integrations + export builders
 - `index.html`: frontend UI

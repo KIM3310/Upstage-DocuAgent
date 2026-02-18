@@ -3,7 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="google-adsense-account" content="ca-pub-0000000000000000">
 <title>DocuAgent — Upstage 문서 분석</title>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-0000000000000000" crossorigin="anonymous"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700&display=swap');
 :root {
@@ -440,6 +442,34 @@ body::after {
   color:var(--text2);
 }
 
+.trust-panel {
+  border-top:1px solid var(--border);
+  padding:14px 24px 18px;
+  display:grid;
+  gap:8px;
+  background:rgba(14, 15, 28, 0.86);
+}
+.trust-title {
+  font-size:12px;
+  color:var(--accent2);
+  font-weight:600;
+}
+.trust-list {
+  font-size:11px;
+  color:var(--text2);
+  line-height:1.5;
+  display:grid;
+  gap:4px;
+}
+.sponsored-slot {
+  border:1px dashed var(--border);
+  border-radius:10px;
+  overflow:hidden;
+  min-height:96px;
+  background:rgba(18, 19, 33, 0.65);
+  padding:6px;
+}
+
 /* Loading */
 .loader {
   display:none; padding:24px; text-align:center;
@@ -675,6 +705,24 @@ body::after {
       </div>
       <div class="community-hint">엔드포인트는 브라우저 localStorage에 저장됩니다.</div>
     </div>
+
+    <div class="trust-panel">
+      <div class="trust-title">Trust & Policy</div>
+      <div class="trust-list">
+        <div>Contact: docuagent@ops.local</div>
+        <div>Privacy: 문서 분석 결과 저장은 사용자가 실행한 세션 범위에서만 수행됩니다.</div>
+        <div>Terms: AI 생성 결과는 검토 후 사용해야 하며, 최종 책임은 사용자에게 있습니다.</div>
+      </div>
+      <div class="sponsored-slot">
+        <ins
+          class="adsbygoogle"
+          style="display:block"
+          data-ad-client="ca-pub-0000000000000000"
+          data-ad-slot="1234567890"
+          data-ad-format="auto"
+          data-full-width-responsive="true"></ins>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -778,6 +826,17 @@ async function submitCommunityFeedback() {
 
 if (communitySubmit) {
   communitySubmit.addEventListener('click', submitCommunityFeedback);
+}
+
+try {
+  if (window.adsbygoogle && Array.isArray(window.adsbygoogle)) {
+    window.adsbygoogle.push({});
+  } else {
+    window.adsbygoogle = window.adsbygoogle || [];
+    window.adsbygoogle.push({});
+  }
+} catch (_err) {
+  // Ad runtime may not be ready in local preview.
 }
 function resetProgressTimers() {
   progressTimers.forEach(clearTimeout);
