@@ -1,0 +1,59 @@
+name: production-smoke
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+  schedule:
+    - cron: "17 */6 * * *"
+
+concurrency:
+  group: production-smoke
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Allow deployment propagation
+        if: github.event_name == 'push'
+        run: sleep 30
+
+      - name: Smoke test production endpoints
+        run: |
+          set -euo pipefail
+          base="https://upstage-docuagent.pages.dev"
+          paths=(
+            "/"
+            "/about.html"
+            "/privacy.html"
+            "/terms.html"
+            "/contact.html"
+            "/compliance.html"
+            "/ads.txt"
+            "/robots.txt"
+            "/sitemap.xml"
+          )
+
+          for path in "${paths[@]}"; do
+            ok=0
+            for attempt in 1 2 3; do
+              code=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 20 "$base$path")
+              echo "[$attempt/3] $path -> $code"
+              if [ "$code" -ge 200 ] && [ "$code" -lt 400 ]; then
+                ok=1
+                break
+              fi
+              sleep 3
+            done
+            if [ "$ok" -ne 1 ]; then
+              echo "Smoke check failed for $path"
+              exit 1
+            fi
+          done
