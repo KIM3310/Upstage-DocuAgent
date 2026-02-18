@@ -1,6 +1,7 @@
 (function () {
   var DEFAULT_GA = "G-XXXXXXXXXX";
   var DEFAULT_CLARITY = "CLARITY_PROJECT_ID";
+  var DEFAULT_GTM = "GTM-MHK4C4D7";
 
   function readMeta(name) {
     var node = document.querySelector("meta[name=\"" + name + "\"]");
@@ -40,6 +41,11 @@
     return /^[a-z0-9]{6,24}$/i.test(value);
   }
 
+  function validGtmId(value) {
+    if (!value) return false;
+    return /^GTM-[A-Z0-9]{6,}$/i.test(value);
+  }
+
   function resolveGaId() {
     var override = (window.__GA_MEASUREMENT_ID__ || "").trim();
     if (validGaId(override)) return override;
@@ -62,6 +68,17 @@
     return validClarityId(fallback) ? fallback : "";
   }
 
+  function resolveGtmId() {
+    var override = (window.__GTM_CONTAINER_ID__ || "").trim();
+    if (validGtmId(override)) return override;
+
+    var meta = (readMeta("gtm-container-id") || "").trim();
+    if (validGtmId(meta)) return meta;
+
+    var fallback = (DEFAULT_GTM || "").trim();
+    return validGtmId(fallback) ? fallback : "";
+  }
+
   function ensureScript(id, src) {
     if (document.getElementById(id)) return;
     var script = document.createElement("script");
@@ -69,6 +86,27 @@
     script.async = true;
     script.src = src;
     document.head.appendChild(script);
+  }
+
+  function hasGtmInstalled() {
+    if (window.google_tag_manager) return true;
+    return !!document.querySelector("script[src*='googletagmanager.com/gtm.js']");
+  }
+
+  function enableGtm(gtmId, consentGranted) {
+    if (!validGtmId(gtmId) || hasGtmInstalled()) return;
+
+    window.dataLayer = window.dataLayer || [];
+    window.dataLayer.push({
+      "gtm.start": new Date().getTime(),
+      event: "gtm.js",
+      analytics_storage: consentGranted ? "granted" : "denied",
+      ad_storage: "denied",
+      ad_user_data: "denied",
+      ad_personalization: "denied"
+    });
+
+    ensureScript("gtm-script", "https://www.googletagmanager.com/gtm.js?id=" + encodeURIComponent(gtmId));
   }
 
   function enableGa(gaId, consentGranted) {
@@ -107,6 +145,7 @@
 
   var gaId = resolveGaId();
   var clarityId = resolveClarityId();
+  var gtmId = resolveGtmId();
 
   var consentMeta = readMeta("analytics-require-consent") || "false";
   var consentOverride = window.__ANALYTICS_REQUIRE_CONSENT__;
@@ -123,11 +162,15 @@
     return;
   }
 
-  if (validGaId(gaId)) {
+  if (validGtmId(gtmId)) {
+    enableGtm(gtmId, consentGranted);
+  }
+
+  if (validGaId(gaId) && !hasGtmInstalled()) {
     enableGa(gaId, consentGranted);
   }
 
-  if (validClarityId(clarityId)) {
+  if (validClarityId(clarityId) && !hasGtmInstalled()) {
     enableClarity(clarityId);
   }
 })();
