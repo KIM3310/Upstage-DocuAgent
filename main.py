@@ -15,6 +15,7 @@ import secrets
 import shutil
 import subprocess
 import tempfile
+import uuid
 import zipfile
 from collections import OrderedDict
 from pathlib import Path
@@ -22,8 +23,8 @@ from typing import Any, Optional
 
 import requests
 from openai import OpenAI
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request
+from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -132,6 +133,37 @@ def _get_upstage_client() -> OpenAI:
 
 app = FastAPI(title="DocuAgent", version="1.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+
+@app.middleware("http")
+async def request_context_middleware(request: Request, call_next):
+    request_id = request.headers.get("x-request-id") or f"req-{uuid.uuid4().hex[:12]}"
+    request.state.request_id = request_id
+    response = await call_next(request)
+    response.headers["x-request-id"] = request_id
+    if request.url.path.startswith("/api/") or request.url.path in {"/healthz"}:
+        response.headers["cache-control"] = "no-store"
+    return response
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    request_id = getattr(request.state, "request_id", f"req-{uuid.uuid4().hex[:12]}")
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail, "request_id": request_id},
+        headers={"x-request-id": request_id, "cache-control": "no-store"},
+    )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    request_id = getattr(request.state, "request_id", f"req-{uuid.uuid4().hex[:12]}")
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "internal server error", "request_id": request_id, "error": str(exc)},
+        headers={"x-request-id": request_id, "cache-control": "no-store"},
+    )
 
 # Serve static assets (logo, one-page image, etc.)
 assets_dir = Path(__file__).parent / "assets"

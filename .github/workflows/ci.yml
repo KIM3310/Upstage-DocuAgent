@@ -30,3 +30,11 @@ jobs:
 
       - name: Pytest
         run: pytest -q
+
+  review-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: AdSense/Cloudflare review gate
+        run: bash tools/release_ops.sh check
