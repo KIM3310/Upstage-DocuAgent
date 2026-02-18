@@ -47,7 +47,7 @@ Open `http://localhost:8000`
   - `robots.txt`
   - `sitemap.xml`
 - Policy pages are included at repo root:
-  - `privacy.html`, `terms.html`, `contact.html`, `compliance.html`
+  - `about.html`, `privacy.html`, `terms.html`, `contact.html`, `compliance.html`
 - Cloudflare security headers template:
   - `_headers`
 

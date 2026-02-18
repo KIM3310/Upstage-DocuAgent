@@ -10,7 +10,6 @@
 <meta property="og:description" content="문서 분석, 교육 콘텐츠 생성, 운영 실무 적용까지 연결하는 서비스">
 <meta property="og:type" content="website">
 <title>DocuAgent — Upstage 문서 분석</title>
-<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-0000000000000000" crossorigin="anonymous"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700&display=swap');
 :root {
@@ -535,6 +534,10 @@ body::after {
   .chat-messages { max-height:60vh; }
 }
 </style>
+
+<meta name="ga-measurement-id" content="G-XXXXXXXXXX" />
+<meta name="clarity-project-id" content="CLARITY_PROJECT_ID" />
+<meta name="analytics-require-consent" content="false" />
 </head>
 <body>
 
@@ -714,10 +717,10 @@ body::after {
     <div class="trust-panel">
       <div class="trust-title">Trust & Policy</div>
       <div class="trust-list">
-        <div>Contact: docuagent@ops.local</div>
+        <div>Contact: <a href="https://github.com/KIM3310/Upstage-DocuAgent/issues">GitHub Issues</a></div>
         <div>Privacy: 문서 분석 결과 저장은 사용자가 실행한 세션 범위에서만 수행됩니다.</div>
         <div>Terms: AI 생성 결과는 검토 후 사용해야 하며, 최종 책임은 사용자에게 있습니다.</div>
-        <div>Links: <a href="./privacy.html">Privacy</a> · <a href="./terms.html">Terms</a> · <a href="./contact.html">Contact</a> · <a href="./compliance.html">Compliance</a></div>
+        <div>Links: <a href="./about.html">About</a> · <a href="./privacy.html">Privacy</a> · <a href="./terms.html">Terms</a> · <a href="./contact.html">Contact</a> · <a href="./compliance.html">Compliance</a></div>
       </div>
       <div class="sponsored-slot">
         <ins
@@ -834,16 +837,36 @@ if (communitySubmit) {
   communitySubmit.addEventListener('click', submitCommunityFeedback);
 }
 
-try {
-  if (window.adsbygoogle && Array.isArray(window.adsbygoogle)) {
-    window.adsbygoogle.push({});
-  } else {
-    window.adsbygoogle = window.adsbygoogle || [];
-    window.adsbygoogle.push({});
-  }
-} catch (_err) {
-  // Ad runtime may not be ready in local preview.
+function validAdSenseClient(value) {
+  return /^ca-pub-\d{16}$/.test(value || '') && value !== 'ca-pub-0000000000000000';
 }
+
+function validAdSenseSlot(value) {
+  return /^\d{8,20}$/.test(value || '') && value !== '1234567890';
+}
+
+function initializeAdsense() {
+  const adNode = document.querySelector('.adsbygoogle');
+  if (!adNode) return;
+  const client = String(adNode.getAttribute('data-ad-client') || '').trim();
+  const slot = String(adNode.getAttribute('data-ad-slot') || '').trim();
+  if (!validAdSenseClient(client) || !validAdSenseSlot(slot)) return;
+
+  const script = document.createElement('script');
+  script.async = true;
+  script.src = `https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${encodeURIComponent(client)}`;
+  script.crossOrigin = 'anonymous';
+  script.onload = () => {
+    try {
+      (window.adsbygoogle = window.adsbygoogle || []).push({});
+    } catch (_err) {
+      // no-op
+    }
+  };
+  document.head.appendChild(script);
+}
+
+initializeAdsense();
 function resetProgressTimers() {
   progressTimers.forEach(clearTimeout);
   progressTimers = [];
@@ -1384,6 +1407,8 @@ function createHtmlExport(data, forPrint = false) {
 
   <h2>원문 파싱</h2>
   <div class="card"><pre>${escapeHtml(data.parsed_markdown || '-')}</pre></div>
+
+<script defer src="./analytics.js"></script>
 </body>
 </html>`;
 }
