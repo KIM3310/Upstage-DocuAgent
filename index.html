@@ -282,6 +282,80 @@ body::after {
   font-size:11px;
   color:var(--text2);
 }
+.session-docs {
+  margin-top:12px;
+  border:1px solid rgba(115, 196, 255, 0.22);
+  border-radius:10px;
+  padding:10px;
+  background:rgba(17, 22, 34, 0.62);
+}
+.session-docs-head {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+  margin-bottom:6px;
+}
+.session-docs-title {
+  font-size:12px;
+  color:#9dd8ff;
+  font-weight:600;
+}
+.session-docs-actions {
+  display:flex;
+  gap:6px;
+  flex-wrap:wrap;
+}
+.session-docs-status {
+  font-size:11px;
+  color:var(--text2);
+  margin-bottom:8px;
+}
+.session-docs-list {
+  display:grid;
+  gap:6px;
+}
+.session-doc-row {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+  border:1px solid rgba(115, 196, 255, 0.14);
+  border-radius:8px;
+  background:rgba(14, 18, 30, 0.8);
+  padding:8px;
+}
+.session-doc-meta {
+  min-width:0;
+  display:flex;
+  flex-direction:column;
+  gap:2px;
+}
+.session-doc-name {
+  font-size:12px;
+  color:var(--text);
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  max-width:260px;
+}
+.session-doc-sub {
+  font-size:11px;
+  color:var(--text2);
+}
+.session-doc-buttons {
+  display:flex;
+  gap:6px;
+  flex-wrap:wrap;
+}
+.session-doc-buttons .ghost-btn {
+  padding:6px 8px;
+  font-size:11px;
+}
+.session-doc-row.active {
+  border-color:rgba(139, 122, 255, 0.5);
+  box-shadow:0 0 0 2px rgba(139, 122, 255, 0.14);
+}
 
 .results { flex:1; overflow-y:auto; padding:20px 24px; }
 
@@ -571,6 +645,19 @@ body::after {
 }
 .loader .steps .done { color:var(--green); }
 .loader .steps .active-step { color:var(--accent2); font-weight:600; }
+.loader-actions {
+  margin-top:10px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:8px;
+  flex-wrap:wrap;
+}
+.loader-status {
+  font-size:12px;
+  color:var(--text2);
+}
+.loader-status.error { color:var(--red); }
 
 .empty-state {
   flex:1; display:flex; align-items:center; justify-content:center;
@@ -613,6 +700,7 @@ body::after {
   .upload-zone { padding:20px; }
   .drop-area { padding:28px 16px; }
   .chat-messages { max-height:60vh; }
+  .session-doc-name { max-width:160px; }
 }
 </style>
 
@@ -695,7 +783,18 @@ body::after {
           <button type="button" class="ghost-btn" id="clearApiKeyBtn">키 삭제</button>
         </div>
         <div class="runtime-status" id="apiKeyStatus"></div>
-        <div class="runtime-hint">입력한 키는 브라우저(localStorage)와 현재 서버 세션에만 저장됩니다.</div>
+        <div class="runtime-hint">입력한 키는 현재 서버 세션에만 저장되며 브라우저 저장소(localStorage)에 남기지 않습니다.</div>
+      </div>
+      <div class="session-docs">
+        <div class="session-docs-head">
+          <div class="session-docs-title">세션 문서</div>
+          <div class="session-docs-actions">
+            <button type="button" class="ghost-btn" id="refreshDocsBtn">새로고침</button>
+            <button type="button" class="ghost-btn" id="clearDocsBtn">전체 삭제</button>
+          </div>
+        </div>
+        <div class="session-docs-status" id="docsStatus">이 세션에서 분석한 문서가 여기에 표시됩니다.</div>
+        <div class="session-docs-list" id="docsList"></div>
       </div>
     </div>
 
@@ -706,6 +805,10 @@ body::after {
       <div id="step2">Information Extract — 핵심 정보 추출 중...</div>
       <div id="step3">Solar 처리 — 분석 요약 생성 중...</div>
       <div id="step4">교육 콘텐츠 — 학습 자료 생성 중...</div>
+    </div>
+    <div class="loader-actions">
+      <button type="button" class="ghost-btn" id="cancelJobBtn" disabled>분석 취소</button>
+      <div class="loader-status" id="jobStatus"></div>
     </div>
   </div>
 
@@ -855,6 +958,10 @@ const exportScorm2004 = document.getElementById('exportScorm2004');
 const exportIms13 = document.getElementById('exportIms13');
 const modeTag = document.getElementById('modeTag');
 const poweredLine = document.getElementById('poweredLine');
+const docsList = document.getElementById('docsList');
+const docsStatus = document.getElementById('docsStatus');
+const refreshDocsBtn = document.getElementById('refreshDocsBtn');
+const clearDocsBtn = document.getElementById('clearDocsBtn');
 const sampleKo = document.getElementById('sampleKo');
 const sampleEn = document.getElementById('sampleEn');
 const communityName = document.getElementById('communityName');
@@ -870,15 +977,17 @@ const apiKeyStatus = document.getElementById('apiKeyStatus');
 const adsSlotInput = document.getElementById('adsSlotInput');
 const adsSlotApply = document.getElementById('adsSlotApply');
 const adPlaceholder = document.getElementById('adPlaceholder');
+const cancelJobBtn = document.getElementById('cancelJobBtn');
+const jobStatus = document.getElementById('jobStatus');
 
 let progressTimers = [];
 let lastAnalysis = null;
 let currentDocId = null;
 let tagSyncTimer = null;
 let currentRecommendations = [];
+let activeAnalysisJobId = null;
 
 const COMMUNITY_ENDPOINT_KEY = 'docuagent_formspree_endpoint';
-const RUNTIME_API_KEY_STORAGE_KEY = 'docuagent_runtime_upstage_api_key';
 const ADSENSE_SLOT_STORAGE_KEY = 'docuagent_adsense_slot';
 const ADSENSE_CLIENT = 'ca-pub-4973160293737562';
 if (communityEndpoint) {
@@ -959,6 +1068,12 @@ function setApiKeyStatus(message, isError = false) {
   apiKeyStatus.className = isError ? 'runtime-status error' : 'runtime-status';
 }
 
+function setJobStatus(message, isError = false) {
+  if (!jobStatus) return;
+  jobStatus.textContent = message || '';
+  jobStatus.className = isError ? 'loader-status error' : 'loader-status';
+}
+
 function maskKey(value) {
   const text = String(value || '').trim();
   if (!text) return '';
@@ -966,18 +1081,38 @@ function maskKey(value) {
   return `${text.slice(0, 4)}${'*'.repeat(text.length - 8)}${text.slice(-4)}`;
 }
 
-async function applyRuntimeApiKey(rawKey, { persist = false, silent = false, refreshHealth = true } = {}) {
+function formatUtc(value) {
+  if (!value) return '-';
+  const dt = new Date(value);
+  if (Number.isNaN(dt.getTime())) return value;
+  return dt.toLocaleString();
+}
+
+function apiErrorMessage(data, fallback = '요청 실패') {
+  if (!data || typeof data !== 'object') return fallback;
+  const detail = data.detail || fallback;
+  const requestId = data.request_id ? ` [request_id=${data.request_id}]` : '';
+  return `${detail}${requestId}`;
+}
+
+async function apiFetch(url, options = {}) {
+  const resp = await fetch(url, options);
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    throw new Error(apiErrorMessage(data, '요청 실패'));
+  }
+  return data;
+}
+
+async function fetchRuntimeConfig() {
+  return apiFetch('/api/runtime/config');
+}
+
+async function applyRuntimeApiKey(rawKey, { silent = false, refreshHealth = true } = {}) {
   const key = String(rawKey || '').trim();
   if (key && key.length < 12) {
     if (!silent) setApiKeyStatus('API 키 형식이 너무 짧습니다. (최소 12자)', true);
     return null;
-  }
-  if (persist) {
-    if (key) {
-      localStorage.setItem(RUNTIME_API_KEY_STORAGE_KEY, key);
-    } else {
-      localStorage.removeItem(RUNTIME_API_KEY_STORAGE_KEY);
-    }
   }
 
   if (saveApiKeyBtn) saveApiKeyBtn.disabled = true;
@@ -986,14 +1121,10 @@ async function applyRuntimeApiKey(rawKey, { persist = false, silent = false, ref
   formData.append('upstage_api_key', key);
 
   try {
-    const resp = await fetch('/api/runtime/config', { method: 'POST', body: formData });
-    const data = await resp.json().catch(() => ({}));
-    if (!resp.ok) {
-      throw new Error(data.detail || 'API 키 설정 실패');
-    }
+    const data = await apiFetch('/api/runtime/config', { method: 'POST', body: formData });
     if (!silent) {
       if (data.runtime_key_configured) {
-        setApiKeyStatus(`API 키 적용 완료 (${data.masked_runtime_key || maskKey(key)})`);
+        setApiKeyStatus(`API 키 적용 완료 (${data.masked_runtime_key || maskKey(key)}) · 현재 세션에만 저장됩니다.`);
       } else if (data.effective_key_configured) {
         setApiKeyStatus('런타임 키는 제거되었고 서버 환경 키가 사용 중입니다.');
       } else {
@@ -1015,15 +1146,132 @@ async function applyRuntimeApiKey(rawKey, { persist = false, silent = false, ref
 
 async function initializeRuntimeKey() {
   if (!upstageApiKeyInput) return;
-  const saved = localStorage.getItem(RUNTIME_API_KEY_STORAGE_KEY) || '';
-  upstageApiKeyInput.value = saved;
-  const state = await applyRuntimeApiKey(saved, { persist: false, silent: true, refreshHealth: false });
-  if (saved) {
-    setApiKeyStatus(`저장된 API 키 적용됨 (${maskKey(saved)})`);
-  } else if (state?.effective_key_configured) {
-    setApiKeyStatus('서버 환경 키로 LIVE 모드 동작 중');
-  } else {
-    setApiKeyStatus('API 키를 입력하면 LIVE 모드로 전환됩니다.');
+  upstageApiKeyInput.value = '';
+  try {
+    const state = await fetchRuntimeConfig();
+    if (state.runtime_key_configured) {
+      setApiKeyStatus(`현재 세션 API 키 적용됨 (${state.masked_runtime_key || ''})`);
+    } else if (state.effective_key_configured) {
+      setApiKeyStatus('서버 환경 키로 LIVE 모드 동작 중');
+    } else {
+      setApiKeyStatus('API 키를 입력하면 LIVE 모드로 전환됩니다. 키는 브라우저에 저장되지 않습니다.');
+    }
+  } catch (err) {
+    setApiKeyStatus(`런타임 설정 조회 실패: ${err?.message || String(err)}`, true);
+  }
+}
+
+function setDocsStatus(message, isError = false) {
+  if (!docsStatus) return;
+  docsStatus.textContent = message || '';
+  docsStatus.style.color = isError ? 'var(--red)' : '';
+}
+
+function renderDocList(items = []) {
+  if (!docsList) return;
+  docsList.innerHTML = '';
+  if (!Array.isArray(items) || items.length === 0) {
+    setDocsStatus('이 세션에서 분석한 문서가 없습니다.');
+    return;
+  }
+  setDocsStatus(`최근 문서 ${items.length}개`);
+  items.forEach(item => {
+    const row = document.createElement('div');
+    row.className = 'session-doc-row';
+    if ((item.doc_id || '') === (currentDocId || '')) {
+      row.classList.add('active');
+    }
+
+    const meta = document.createElement('div');
+    meta.className = 'session-doc-meta';
+    const name = document.createElement('div');
+    name.className = 'session-doc-name';
+    name.textContent = item.filename || '(untitled)';
+    const sub = document.createElement('div');
+    sub.className = 'session-doc-sub';
+    const mode = (item.mode || 'demo').toUpperCase();
+    sub.textContent = `${mode} · ${formatUtc(item.created_at_utc || '')}`;
+    meta.appendChild(name);
+    meta.appendChild(sub);
+
+    const buttons = document.createElement('div');
+    buttons.className = 'session-doc-buttons';
+    const loadBtn = document.createElement('button');
+    loadBtn.type = 'button';
+    loadBtn.className = 'ghost-btn';
+    loadBtn.textContent = '불러오기';
+    loadBtn.addEventListener('click', () => loadDocFromSession(item.doc_id));
+    const delBtn = document.createElement('button');
+    delBtn.type = 'button';
+    delBtn.className = 'ghost-btn';
+    delBtn.textContent = '삭제';
+    delBtn.addEventListener('click', () => deleteDocFromSession(item.doc_id));
+    buttons.appendChild(loadBtn);
+    buttons.appendChild(delBtn);
+
+    row.appendChild(meta);
+    row.appendChild(buttons);
+    docsList.appendChild(row);
+  });
+}
+
+async function refreshDocList({ silent = false } = {}) {
+  try {
+    const payload = await apiFetch('/api/docs?limit=30&offset=0');
+    renderDocList(payload.items || []);
+  } catch (err) {
+    if (!silent) setDocsStatus(`문서 목록 조회 실패: ${err?.message || String(err)}`, true);
+  }
+}
+
+async function loadDocFromSession(docId) {
+  if (!docId) return;
+  try {
+    setDocsStatus('문서 불러오는 중...');
+    const data = await apiFetch(`/api/docs/${encodeURIComponent(docId)}`);
+    applyAnalysisResult(data, { announce: false });
+    addMsg('agent', `"${data.filename}" 문서를 세션 기록에서 불러왔습니다.`);
+    await refreshDocList({ silent: true });
+  } catch (err) {
+    setDocsStatus(`문서 불러오기 실패: ${err?.message || String(err)}`, true);
+  }
+}
+
+async function deleteDocFromSession(docId) {
+  if (!docId) return;
+  try {
+    await apiFetch(`/api/docs/${encodeURIComponent(docId)}`, { method: 'DELETE' });
+    if (currentDocId === docId) {
+      currentDocId = null;
+      lastAnalysis = null;
+      docReady = false;
+      setExportEnabled(false);
+      chatInput.disabled = true;
+      sendBtn.disabled = true;
+      emptyChat.style.display = 'flex';
+      results.style.display = 'none';
+    }
+    await refreshDocList({ silent: true });
+  } catch (err) {
+    setDocsStatus(`문서 삭제 실패: ${err?.message || String(err)}`, true);
+  }
+}
+
+async function clearSessionDocs() {
+  try {
+    const payload = await apiFetch('/api/docs/clear', { method: 'POST' });
+    currentDocId = null;
+    lastAnalysis = null;
+    docReady = false;
+    setExportEnabled(false);
+    chatInput.disabled = true;
+    sendBtn.disabled = true;
+    emptyChat.style.display = 'flex';
+    results.style.display = 'none';
+    setDocsStatus(`세션 문서 ${payload.deleted || 0}개를 삭제했습니다.`);
+    await refreshDocList({ silent: true });
+  } catch (err) {
+    setDocsStatus(`전체 삭제 실패: ${err?.message || String(err)}`, true);
   }
 }
 
@@ -1072,21 +1320,27 @@ function initializeAdsenseControls() {
 }
 
 if (saveApiKeyBtn) {
-  saveApiKeyBtn.addEventListener('click', () => applyRuntimeApiKey(upstageApiKeyInput?.value || '', { persist: true }));
+  saveApiKeyBtn.addEventListener('click', () => applyRuntimeApiKey(upstageApiKeyInput?.value || ''));
 }
 if (clearApiKeyBtn) {
   clearApiKeyBtn.addEventListener('click', () => {
     if (upstageApiKeyInput) upstageApiKeyInput.value = '';
-    applyRuntimeApiKey('', { persist: true });
+    applyRuntimeApiKey('');
   });
 }
 if (upstageApiKeyInput) {
   upstageApiKeyInput.addEventListener('keydown', e => {
     if (e.key === 'Enter') {
       e.preventDefault();
-      applyRuntimeApiKey(upstageApiKeyInput.value || '', { persist: true });
+      applyRuntimeApiKey(upstageApiKeyInput.value || '');
     }
   });
+}
+if (refreshDocsBtn) {
+  refreshDocsBtn.addEventListener('click', () => refreshDocList());
+}
+if (clearDocsBtn) {
+  clearDocsBtn.addEventListener('click', () => clearSessionDocs());
 }
 if (adsSlotApply) {
   adsSlotApply.addEventListener('click', () => applyAdsenseSlot(adsSlotInput?.value || '', { persist: true }));
@@ -1099,10 +1353,152 @@ if (adsSlotInput) {
     }
   });
 }
+if (cancelJobBtn) {
+  cancelJobBtn.addEventListener('click', () => cancelCurrentJob());
+}
 
 function resetProgressTimers() {
   progressTimers.forEach(clearTimeout);
   progressTimers = [];
+}
+
+function stepTitle(index) {
+  if (index === 1) return 'Document Parse';
+  if (index === 2) return 'Information Extract';
+  if (index === 3) return 'Solar 처리';
+  return '교육 콘텐츠';
+}
+
+function setStepVisual(index, state, label = '') {
+  const node = document.getElementById(`step${index}`);
+  if (!node) return;
+  const title = stepTitle(index);
+  if (state === 'done') {
+    node.className = 'done';
+    node.textContent = `${title} — 완료`;
+    return;
+  }
+  if (state === 'active') {
+    node.className = 'active-step';
+    node.textContent = `${label || title} — 처리 중...`;
+    return;
+  }
+  node.className = '';
+  node.textContent = `${title} — 대기 중`;
+}
+
+function setPipelineActive(index) {
+  for (let i = 1; i <= 4; i++) {
+    const node = document.getElementById(`ps${i}`);
+    if (!node) continue;
+    node.classList.toggle('active', i === index);
+  }
+}
+
+function updateProgressFromJob(job) {
+  const status = String(job?.status || 'queued');
+  const rawStep = Number(job?.step || 0);
+  const step = Math.max(1, Math.min(4, rawStep || 1));
+  const label = String(job?.progress_label || '').trim();
+
+  if (status === 'queued') {
+    setStepVisual(1, 'active', '분석 작업');
+    setStepVisual(2, 'pending');
+    setStepVisual(3, 'pending');
+    setStepVisual(4, 'pending');
+    setPipelineActive(1);
+    setJobStatus('작업 대기 중...');
+    return;
+  }
+
+  if (status === 'running') {
+    for (let i = 1; i <= 4; i++) {
+      if (i < step) setStepVisual(i, 'done');
+      else if (i === step) setStepVisual(i, 'active', label || stepTitle(i));
+      else setStepVisual(i, 'pending');
+    }
+    setPipelineActive(step);
+    setJobStatus(label ? `${label} 진행 중` : '분석 진행 중');
+    return;
+  }
+
+  if (status === 'canceling') {
+    for (let i = 1; i <= 4; i++) {
+      if (i < step) setStepVisual(i, 'done');
+      else if (i === step) setStepVisual(i, 'active', `${stepTitle(i)} 취소 중`);
+      else setStepVisual(i, 'pending');
+    }
+    setPipelineActive(step);
+    setJobStatus('취소 요청됨...');
+    return;
+  }
+
+  if (status === 'completed') {
+    for (let i = 1; i <= 4; i++) setStepVisual(i, 'done');
+    setPipelineActive(4);
+    setJobStatus('분석 완료');
+    return;
+  }
+
+  if (status === 'failed') {
+    for (let i = 1; i <= 4; i++) {
+      if (i < step) setStepVisual(i, 'done');
+      else if (i === step) setStepVisual(i, 'active', `${stepTitle(i)} 실패`);
+      else setStepVisual(i, 'pending');
+    }
+    setPipelineActive(step);
+    setJobStatus('분석 실패', true);
+    return;
+  }
+
+  if (status === 'canceled') {
+    for (let i = 1; i <= 4; i++) {
+      if (i < step) setStepVisual(i, 'done');
+      else setStepVisual(i, 'pending');
+    }
+    setPipelineActive(step);
+    setJobStatus('분석 작업이 취소되었습니다.');
+  }
+}
+
+async function waitForAnalysisJob(jobId, { timeoutMs = 5 * 60 * 1000, pollMs = 900 } = {}) {
+  const started = Date.now();
+  while (true) {
+    const job = await apiFetch(`/api/analyze/jobs/${encodeURIComponent(jobId)}`);
+    updateProgressFromJob(job);
+    if (job.status === 'completed') {
+      if (job.result) return job.result;
+      if (job.doc_id) {
+        return apiFetch(`/api/docs/${encodeURIComponent(job.doc_id)}`);
+      }
+      throw new Error('작업은 완료되었지만 결과를 찾을 수 없습니다.');
+    }
+    if (job.status === 'failed') {
+      throw new Error(job.error || '분석 작업이 실패했습니다.');
+    }
+    if (job.status === 'canceled') {
+      throw new Error(job.error || '분석 작업이 취소되었습니다.');
+    }
+    if (Date.now() - started > timeoutMs) {
+      throw new Error('분석 시간이 초과되었습니다. 잠시 후 다시 시도해주세요.');
+    }
+    await new Promise(resolve => setTimeout(resolve, pollMs));
+  }
+}
+
+async function cancelCurrentJob() {
+  if (!activeAnalysisJobId) return;
+  if (cancelJobBtn) cancelJobBtn.disabled = true;
+  setJobStatus('취소 요청 중...');
+  try {
+    const payload = await apiFetch(`/api/analyze/jobs/${encodeURIComponent(activeAnalysisJobId)}/cancel`, {
+      method: 'POST',
+    });
+    updateProgressFromJob(payload);
+  } catch (err) {
+    setJobStatus(`취소 실패: ${err?.message || String(err)}`, true);
+    if (cancelJobBtn) cancelJobBtn.disabled = false;
+  }
 }
 
 function setExportEnabled(enabled) {
@@ -1131,8 +1527,7 @@ fileInput.addEventListener('change', e => { if(e.target.files.length) handleFile
 async function initHealth() {
   if(!modeTag) return;
   try {
-    const resp = await fetch('/healthz');
-    const data = await resp.json();
+    const data = await apiFetch('/healthz');
     const demo = !!data.demo_mode;
     modeTag.textContent = demo ? 'DEMO' : 'LIVE';
     modeTag.dataset.mode = demo ? 'demo' : 'live';
@@ -1168,15 +1563,74 @@ async function initializeRuntime() {
   initializeAdsenseControls();
   await initializeRuntimeKey();
   await initHealth();
+  await refreshDocList({ silent: true });
 }
 
 initializeRuntime();
+
+function applyAnalysisResult(data, { announce = true } = {}) {
+  resetProgressTimers();
+  loader.classList.remove('active');
+  setJobStatus('');
+  results.style.display = 'block';
+  document.getElementById('step1').className = 'done';
+  document.getElementById('step1').textContent = 'Document Parse — 완료';
+  document.getElementById('step2').className = 'done';
+  document.getElementById('step2').textContent = 'Information Extract — 완료';
+  document.getElementById('step3').className = 'done';
+  document.getElementById('step3').textContent = 'Solar 처리 — 완료';
+  document.getElementById('step4').className = 'done';
+  document.getElementById('step4').textContent = '교육 콘텐츠 — 완료';
+  document.getElementById('ps1').classList.remove('active');
+  document.getElementById('ps2').classList.remove('active');
+  document.getElementById('ps3').classList.remove('active');
+  document.getElementById('ps4').classList.add('active');
+
+  document.getElementById('parsedContent').textContent = data.parsed_markdown || '(empty)';
+
+  const grid = document.getElementById('extractedGrid');
+  grid.innerHTML = '';
+  if(data.extracted_data && typeof data.extracted_data === 'object') {
+    for(const [k, v] of Object.entries(data.extracted_data)) {
+      if(k === 'raw') continue;
+      grid.innerHTML += `<div class="extracted-item"><div class="key">${k}</div><div class="val">${v || '-'}</div></div>`;
+    }
+  }
+
+  document.getElementById('summaryText').textContent = data.summary || '';
+
+  const edu = data.edu_pack || {};
+  renderList('eduObjectives', edu.learning_objectives, '학습 목표가 없습니다.');
+  renderList('eduConcepts', edu.key_concepts, '핵심 개념이 없습니다.');
+  document.getElementById('eduSummary').textContent = edu.summary || '교육용 요약이 없습니다.';
+  renderQA('eduQuiz', edu.quiz, 'question', 'answer', '퀴즈가 없습니다.');
+  renderQA('eduCards', edu.flashcards, 'front', 'back', '플래시카드가 없습니다.');
+  renderList('eduActivities', edu.activities, '활동/과제가 없습니다.');
+
+  docReady = true;
+  chatInput.disabled = false;
+  sendBtn.disabled = false;
+  emptyChat.style.display = 'none';
+  lastAnalysis = data;
+  currentDocId = data.doc_id || 'current';
+  setExportEnabled(true);
+  if(Array.isArray(data.tags)) {
+    tagInput.value = data.tags.join(', ');
+  }
+  currentRecommendations = getRecommendedTags(data);
+  renderTagSuggestions(currentRecommendations);
+
+  if (announce) {
+    addMsg('agent', `"${data.filename}" 분석이 완료되었습니다.\n\n${data.summary || ''}\n\n궁금한 점을 질문해주세요!`);
+  }
+}
 
 async function handleFile(file) {
   // Reset
   resetProgressTimers();
   lastAnalysis = null;
   currentDocId = null;
+  activeAnalysisJobId = null;
   setExportEnabled(false);
   docReady = false;
   chatInput.disabled = true;
@@ -1187,20 +1641,9 @@ async function handleFile(file) {
   renderTagSuggestions([]);
   results.style.display = 'none';
   loader.classList.add('active');
-  document.getElementById('step1').className = 'active-step';
-  document.getElementById('step1').textContent = 'Document Parse — 문서 구조 분석 중...';
-  document.getElementById('step2').className = '';
-  document.getElementById('step2').textContent = 'Information Extract — 대기 중';
-  document.getElementById('step3').className = '';
-  document.getElementById('step3').textContent = 'Solar 처리 — 대기 중';
-  document.getElementById('step4').className = '';
-  document.getElementById('step4').textContent = '교육 콘텐츠 — 대기 중';
-
-  // Pipeline badges
-  document.getElementById('ps1').classList.add('active');
-  document.getElementById('ps2').classList.remove('active');
-  document.getElementById('ps3').classList.remove('active');
-  document.getElementById('ps4').classList.remove('active');
+  setJobStatus('');
+  if (cancelJobBtn) cancelJobBtn.disabled = true;
+  updateProgressFromJob({ status: 'queued', step: 1, progress_label: '분석 작업' });
 
   dropArea.innerHTML = `<p>${file.name} (${(file.size/1024).toFixed(1)}KB)</p>`;
 
@@ -1210,102 +1653,22 @@ async function handleFile(file) {
   formData.append('goal', goalSelect.value);
   formData.append('tags', tagInput.value);
 
-  // Simulate step progression
-  progressTimers.push(setTimeout(() => {
-    document.getElementById('step1').className = 'done';
-    document.getElementById('step1').textContent = 'Document Parse — 완료';
-    document.getElementById('step2').className = 'active-step';
-    document.getElementById('step2').textContent = 'Information Extract — 핵심 정보 추출 중...';
-    document.getElementById('ps1').classList.remove('active');
-    document.getElementById('ps2').classList.add('active');
-  }, 2500));
-
-  progressTimers.push(setTimeout(() => {
-    document.getElementById('step2').className = 'done';
-    document.getElementById('step2').textContent = 'Information Extract — 완료';
-    document.getElementById('step3').className = 'active-step';
-    document.getElementById('step3').textContent = 'Solar 처리 — 분석 요약 생성 중...';
-    document.getElementById('ps2').classList.remove('active');
-    document.getElementById('ps3').classList.add('active');
-  }, 5500));
-
-  progressTimers.push(setTimeout(() => {
-    document.getElementById('step3').className = 'done';
-    document.getElementById('step3').textContent = 'Solar 처리 — 완료';
-    document.getElementById('step4').className = 'active-step';
-    document.getElementById('step4').textContent = '교육 콘텐츠 — 학습 자료 생성 중...';
-    document.getElementById('ps3').classList.remove('active');
-    document.getElementById('ps4').classList.add('active');
-  }, 8000));
-
   try {
-    const resp = await fetch('/api/analyze', { method:'POST', body:formData });
-    const data = await resp.json();
-
-    if(!resp.ok) throw new Error(data.detail || 'Analysis failed');
-
-    // Show results
-    resetProgressTimers();
-    loader.classList.remove('active');
-    results.style.display = 'block';
-    document.getElementById('step1').className = 'done';
-    document.getElementById('step1').textContent = 'Document Parse — 완료';
-    document.getElementById('step2').className = 'done';
-    document.getElementById('step2').textContent = 'Information Extract — 완료';
-    document.getElementById('step3').className = 'done';
-    document.getElementById('step3').textContent = 'Solar 처리 — 완료';
-    document.getElementById('step4').className = 'done';
-    document.getElementById('step4').textContent = '교육 콘텐츠 — 완료';
-    document.getElementById('ps1').classList.remove('active');
-    document.getElementById('ps2').classList.remove('active');
-    document.getElementById('ps3').classList.remove('active');
-    document.getElementById('ps4').classList.add('active');
-
-    // Parsed content
-    document.getElementById('parsedContent').textContent = data.parsed_markdown || '(empty)';
-
-    // Extracted data
-    const grid = document.getElementById('extractedGrid');
-    grid.innerHTML = '';
-    if(data.extracted_data && typeof data.extracted_data === 'object') {
-      for(const [k, v] of Object.entries(data.extracted_data)) {
-        if(k === 'raw') continue;
-        grid.innerHTML += `<div class="extracted-item"><div class="key">${k}</div><div class="val">${v || '-'}</div></div>`;
-      }
-    }
-
-    // Summary
-    document.getElementById('summaryText').textContent = data.summary;
-
-    // Education pack
-    const edu = data.edu_pack || {};
-    renderList('eduObjectives', edu.learning_objectives, '학습 목표가 없습니다.');
-    renderList('eduConcepts', edu.key_concepts, '핵심 개념이 없습니다.');
-    document.getElementById('eduSummary').textContent = edu.summary || '교육용 요약이 없습니다.';
-    renderQA('eduQuiz', edu.quiz, 'question', 'answer', '퀴즈가 없습니다.');
-    renderQA('eduCards', edu.flashcards, 'front', 'back', '플래시카드가 없습니다.');
-    renderList('eduActivities', edu.activities, '활동/과제가 없습니다.');
-
-    // Enable chat
-    docReady = true;
-    chatInput.disabled = false;
-    sendBtn.disabled = false;
-    emptyChat.style.display = 'none';
-    lastAnalysis = data;
-    currentDocId = data.doc_id || 'current';
-    setExportEnabled(true);
-    if(Array.isArray(data.tags)) {
-      tagInput.value = data.tags.join(', ');
-    }
-    currentRecommendations = getRecommendedTags(data);
-    renderTagSuggestions(currentRecommendations);
-
-    addMsg('agent', `"${data.filename}" 분석이 완료되었습니다.\n\n${data.summary}\n\n궁금한 점을 질문해주세요!`);
+    const created = await apiFetch('/api/analyze/jobs', { method:'POST', body:formData });
+    activeAnalysisJobId = created.job_id || null;
+    if (cancelJobBtn) cancelJobBtn.disabled = !activeAnalysisJobId;
+    if (activeAnalysisJobId) setJobStatus(`작업 ID: ${activeAnalysisJobId}`);
+    const data = await waitForAnalysisJob(created.job_id);
+    applyAnalysisResult(data, { announce: true });
+    await refreshDocList({ silent: true });
 
   } catch(err) {
     resetProgressTimers();
     loader.classList.remove('active');
-    alert('분석 실패: ' + err.message);
+    alert('분석 실패: ' + (err?.message || String(err)));
+  } finally {
+    if (cancelJobBtn) cancelJobBtn.disabled = true;
+    activeAnalysisJobId = null;
   }
 }
 
@@ -1370,12 +1733,10 @@ async function sendChat() {
     formData.append('question', q);
     formData.append('doc_id', currentDocId || 'current');
 
-    const resp = await fetch('/api/chat', { method:'POST', body:formData });
-    const data = await resp.json();
-
+    const data = await apiFetch('/api/chat', { method:'POST', body:formData });
     thinkMsg.querySelector('.content').textContent = data.answer;
   } catch(err) {
-    thinkMsg.querySelector('.content').textContent = '오류가 발생했습니다: ' + err.message;
+    thinkMsg.querySelector('.content').textContent = '오류가 발생했습니다: ' + (err?.message || String(err));
   }
 
   sendBtn.disabled = false;
@@ -1446,9 +1807,7 @@ async function syncTags() {
   formData.append('doc_id', currentDocId || 'current');
   formData.append('tags', tags.join(','));
   try {
-    const resp = await fetch('/api/update-tags', { method:'POST', body:formData });
-    if(!resp.ok) return;
-    const data = await resp.json();
+    const data = await apiFetch('/api/update-tags', { method:'POST', body:formData });
     lastAnalysis.tags = data.tags || tags;
   } catch {
     // ignore
@@ -1679,7 +2038,10 @@ function openPrintWindow(html) {
 async function downloadFromApi(url, filename) {
   try {
     const resp = await fetch(url);
-    if(!resp.ok) throw new Error('다운로드 실패');
+    if(!resp.ok) {
+      const data = await resp.json().catch(() => ({}));
+      throw new Error(apiErrorMessage(data, '다운로드 실패'));
+    }
     const blob = await resp.blob();
     const a = document.createElement('a');
     const blobUrl = URL.createObjectURL(blob);
@@ -1690,7 +2052,7 @@ async function downloadFromApi(url, filename) {
     a.remove();
     URL.revokeObjectURL(blobUrl);
   } catch (err) {
-    alert(err.message || '다운로드 중 오류가 발생했습니다.');
+    alert((err && err.message) || '다운로드 중 오류가 발생했습니다.');
   }
 }
 

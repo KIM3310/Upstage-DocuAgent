@@ -57,9 +57,12 @@ Health check: http://localhost:8000/healthz
    - Or click the sample buttons (KO/EN) on the UI
 2) Select audience level and learning goal
 3) Enter LOM tags (optional)
-4) Review results
-5) Export to Markdown/HTML/PDF/SCORM/IMS
-6) Ask questions about the document
+4) (Optional) Enter a Runtime API key in the UI
+   - Key is applied to the current browser session only (not persisted in localStorage)
+5) Review results
+6) Export to Markdown/HTML/PDF/SCORM/IMS
+7) Ask questions about the document
+8) Re-open or delete previous session docs from the `세션 문서` panel
 
 ## Export Formats
 - Markdown: Notion-friendly
@@ -82,6 +85,24 @@ Health check: http://localhost:8000/healthz
 ## Notes
 - PDF input: poppler (pdftoppm) is preferred. If not available, pypdfium2 + Pillow are used.
 - Demo mode uses best-effort local PDF text extraction via pypdf (no OCR).
+- Information Extract uses up to the first 3 PDF pages by default (`DOCUAGENT_IE_MAX_PAGES`).
+- Documents and runtime keys are session-scoped in-memory state; one session cannot access another session's `doc_id`.
+- Uploads are validated by extension allowlist (`DOCUAGENT_ALLOWED_EXTENSIONS`).
+- Upstage upstream calls use retry/timeout controls (`DOCUAGENT_UPSTREAM_RETRY_TOTAL`, `DOCUAGENT_UPSTREAM_TIMEOUT_SEC`).
+- Per-session rate limits protect analyze/chat/runtime APIs (`DOCUAGENT_RATE_LIMIT_*`).
+- Frontend analyze flow uses async job polling (`/api/analyze/jobs`) and supports cancel requests (`/api/analyze/jobs/{job_id}/cancel`).
+- Async jobs now include per-session/global active job limits and TTL cleanup (`DOCUAGENT_MAX_ACTIVE_ANALYSIS_JOBS*`, `DOCUAGENT_ANALYSIS_JOB_TTL_SEC`).
+- In-memory document retention is controlled by `DOCUAGENT_DOC_TTL_SEC`.
+- Lightweight request metrics are available at `/api/metrics` (rolling latency/error aggregates).
+
+## Security-related Env
+- `DOCUAGENT_CORS_ORIGINS`: comma-separated origin allowlist
+- `DOCUAGENT_COOKIE_SECURE`: force secure cookies (`1`/`true`)
+- `DOCUAGENT_COOKIE_SAMESITE`: `lax` / `strict` / `none`
+- `DOCUAGENT_HOST`: defaults to `127.0.0.1`
+- `DOCUAGENT_MAX_ACTIVE_ANALYSIS_JOBS` / `DOCUAGENT_MAX_ACTIVE_ANALYSIS_JOBS_PER_SESSION`: async analysis concurrency guardrails
+- `DOCUAGENT_ANALYSIS_JOB_TTL_SEC` / `DOCUAGENT_DOC_TTL_SEC`: in-memory retention windows
+- `DOCUAGENT_METRICS_SAMPLE_SIZE` / `DOCUAGENT_MAX_METRICS_PATHS`: request metrics sample bounds
 
 ## Dev / Tests
 ```

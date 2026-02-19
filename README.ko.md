@@ -58,9 +58,11 @@ python main.py
 2) 학습자 수준/학습 목표 선택
 3) LOM 태그 입력(선택)
 4) (선택) Runtime API Key 패널에 Upstage API 키 입력
+   - 키는 현재 브라우저 세션에만 적용되며 localStorage에 저장하지 않습니다.
 5) 분석 완료 후 결과 확인
 6) Markdown/HTML/PDF/SCORM/IMS로 내보내기
 7) 문서 기반 질의응답
+8) `세션 문서` 패널에서 이전 분석 문서 불러오기/삭제
 
 ## 광고(AdSense) 설정
 - 퍼블리셔 클라이언트는 `ca-pub-4973160293737562`로 포함되어 있습니다.
@@ -87,6 +89,24 @@ python main.py
 ## 참고
 - PDF 입력은 poppler(pdftoppm) 우선, 미설치 환경은 pypdfium2 + Pillow 경로를 사용합니다.
 - 데모 모드는 pypdf 기반의 로컬 텍스트 추출을 사용하며 OCR은 수행하지 않습니다.
+- Information Extract는 기본적으로 PDF 앞 3페이지를 사용합니다. (`DOCUAGENT_IE_MAX_PAGES`)
+- 문서 데이터와 런타임 API 키는 세션 단위 메모리 저장이며, 다른 세션의 `doc_id`에는 접근할 수 없습니다.
+- 업로드 파일은 확장자 허용 목록(`DOCUAGENT_ALLOWED_EXTENSIONS`)으로 검증합니다.
+- Upstage API 호출은 재시도/타임아웃 설정(`DOCUAGENT_UPSTREAM_RETRY_TOTAL`, `DOCUAGENT_UPSTREAM_TIMEOUT_SEC`)을 따릅니다.
+- 세션 단위 요청 제한(`DOCUAGENT_RATE_LIMIT_*`)으로 analyze/chat/runtime API를 보호합니다.
+- 프론트 분석 플로우는 비동기 작업 폴링(`/api/analyze/jobs`) 기반이며, 작업 취소 API(`/api/analyze/jobs/{job_id}/cancel`)를 지원합니다.
+- 비동기 작업은 세션/전체 동시 작업 상한과 TTL 정리(`DOCUAGENT_MAX_ACTIVE_ANALYSIS_JOBS*`, `DOCUAGENT_ANALYSIS_JOB_TTL_SEC`)를 적용합니다.
+- 문서 메모리 보관 기간은 `DOCUAGENT_DOC_TTL_SEC`로 제어합니다.
+- 경량 요청 메트릭은 `/api/metrics`에서 확인할 수 있습니다.
+
+## 보안 관련 환경변수
+- `DOCUAGENT_CORS_ORIGINS`: 콤마 구분 Origin 허용 목록
+- `DOCUAGENT_COOKIE_SECURE`: secure 쿠키 강제 (`1`/`true`)
+- `DOCUAGENT_COOKIE_SAMESITE`: `lax` / `strict` / `none`
+- `DOCUAGENT_HOST`: 기본값 `127.0.0.1`
+- `DOCUAGENT_MAX_ACTIVE_ANALYSIS_JOBS` / `DOCUAGENT_MAX_ACTIVE_ANALYSIS_JOBS_PER_SESSION`: 비동기 분석 동시성 보호
+- `DOCUAGENT_ANALYSIS_JOB_TTL_SEC` / `DOCUAGENT_DOC_TTL_SEC`: 메모리 보관 기간
+- `DOCUAGENT_METRICS_SAMPLE_SIZE` / `DOCUAGENT_MAX_METRICS_PATHS`: 요청 메트릭 샘플 크기
 
 ## 개발 / 테스트
 ```

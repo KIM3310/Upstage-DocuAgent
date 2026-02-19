@@ -36,7 +36,10 @@ UPSTAGE_API_KEY="your_api_key_here" python3 main.py
 Open `http://localhost:8000`
 - Click sample buttons on the UI: `샘플 불러오기 (KO)` / `Sample (EN)`
 - Health check: `http://localhost:8000/healthz`
-- Optional: paste your Upstage key in the UI `Runtime API Key` panel (session-scoped backend config)
+- Runtime metrics: `http://localhost:8000/api/metrics`
+- Optional: paste your Upstage key in the UI `Runtime API Key` panel (session-scoped backend config, not persisted in browser storage)
+- Manage previously analyzed docs per session via `세션 문서` panel (reload/delete/clear)
+- Async analysis jobs support polling, cancellation, and concurrency guardrails (`/api/analyze/jobs`, `/api/analyze/jobs/{job_id}/cancel`)
 
 ## AdSense + Cloudflare Pages Prep
 - `index.html` includes an AdSense script with publisher client:

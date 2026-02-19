@@ -51,7 +51,7 @@ class TestSmoke(unittest.TestCase):
 
             importlib.reload(main)
 
-            with patch.object(main.requests, "post") as post:
+            with patch.object(main.HTTP_SESSION, "post") as post:
                 parsed = main.call_document_parse(b"hello world", "note.txt")
                 self.assertIn("Demo Document Parse", parsed["markdown"])
 
