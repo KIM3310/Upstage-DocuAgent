@@ -18,6 +18,7 @@ import tempfile
 import uuid
 import zipfile
 from collections import OrderedDict
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any, Optional
 
@@ -79,13 +80,29 @@ MAX_CHAT_QUESTION_CHARS = _read_int_env(
     minimum=16,
     maximum=20000,
 )
+MAX_RUNTIME_SESSIONS = _read_int_env(
+    "DOCUAGENT_MAX_RUNTIME_SESSIONS",
+    200,
+    minimum=10,
+    maximum=5000,
+)
+SESSION_COOKIE_NAME = "docuagent_sid"
+SESSION_COOKIE_MAX_AGE = 60 * 60 * 24 * 30
+REQUEST_UPSTAGE_API_KEY: ContextVar[str] = ContextVar("request_upstage_api_key", default="")
 
 
 def _truthy(value: Optional[str]) -> bool:
     return str(value or "").strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
+def _is_placeholder_key(value: str) -> bool:
+    return str(value or "").strip().lower() in {"your_api_key_here", "change_me"}
+
+
 def _get_upstage_api_key() -> str:
+    runtime_key = (REQUEST_UPSTAGE_API_KEY.get() or "").strip()
+    if runtime_key:
+        return runtime_key
     return (os.getenv("UPSTAGE_API_KEY") or "").strip()
 
 
@@ -97,7 +114,7 @@ def _get_solar_model() -> str:
     return (os.getenv("UPSTAGE_SOLAR_MODEL") or DEFAULT_SOLAR_MODEL).strip()
 
 
-def _is_demo_mode() -> bool:
+def _is_demo_mode(api_key: Optional[str] = None) -> bool:
     # Force demo mode for reviewers: no paid keys required.
     if (os.getenv("DOCUAGENT_MODE") or "").strip().lower() in {"demo", "stub"}:
         return True
@@ -105,31 +122,36 @@ def _is_demo_mode() -> bool:
     if _truthy(os.getenv("DOCUAGENT_DEMO_MODE")):
         return True
 
-    key = _get_upstage_api_key()
+    key = _get_upstage_api_key() if api_key is None else str(api_key or "").strip()
     if not key:
         return True
 
     # Common placeholder values.
-    if key.lower() in {"your_api_key_here", "change_me"}:
+    if _is_placeholder_key(key):
         return True
 
     return False
 
 
-_client: Optional[OpenAI] = None
+_client_cache: "OrderedDict[str, OpenAI]" = OrderedDict()
 
 
 def _get_upstage_client() -> OpenAI:
-    global _client
-    if _client is not None:
-        return _client
-
     key = _get_upstage_api_key()
     if not key:
         raise RuntimeError("UPSTAGE_API_KEY is not set")
 
-    _client = OpenAI(api_key=key, base_url=_get_upstage_base_url())
-    return _client
+    base_url = _get_upstage_base_url()
+    cache_key = f"{base_url}|{key}"
+    if cache_key in _client_cache:
+        _client_cache.move_to_end(cache_key)
+        return _client_cache[cache_key]
+
+    client = OpenAI(api_key=key, base_url=base_url)
+    _client_cache[cache_key] = client
+    while len(_client_cache) > 32:
+        _client_cache.popitem(last=False)
+    return client
 
 app = FastAPI(title="DocuAgent", version="1.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -138,9 +160,27 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 @app.middleware("http")
 async def request_context_middleware(request: Request, call_next):
     request_id = request.headers.get("x-request-id") or f"req-{uuid.uuid4().hex[:12]}"
+    session_id, is_new_session = _resolve_session_id(request.cookies.get(SESSION_COOKIE_NAME))
+    runtime_settings = _get_runtime_settings(session_id)
+    runtime_key = str(runtime_settings.get("upstage_api_key") or "").strip()
+    key_token = REQUEST_UPSTAGE_API_KEY.set(runtime_key)
     request.state.request_id = request_id
-    response = await call_next(request)
+    request.state.session_id = session_id
+    request.state.runtime_settings = runtime_settings
+    try:
+        response = await call_next(request)
+    finally:
+        REQUEST_UPSTAGE_API_KEY.reset(key_token)
     response.headers["x-request-id"] = request_id
+    if is_new_session:
+        response.set_cookie(
+            key=SESSION_COOKIE_NAME,
+            value=session_id,
+            max_age=SESSION_COOKIE_MAX_AGE,
+            httponly=True,
+            samesite="lax",
+            path="/",
+        )
     if request.url.path.startswith("/api/") or request.url.path in {"/healthz"}:
         response.headers["cache-control"] = "no-store"
     return response
@@ -172,6 +212,7 @@ if assets_dir.exists():
 
 # In-memory document store (per session, demo purpose)
 doc_store: "OrderedDict[str, dict[str, Any]]" = OrderedDict()
+runtime_store: "OrderedDict[str, dict[str, str]]" = OrderedDict()
 
 
 def _put_doc(doc_id: str, doc: dict[str, Any]) -> None:
@@ -179,6 +220,33 @@ def _put_doc(doc_id: str, doc: dict[str, Any]) -> None:
     doc_store.move_to_end(doc_id)
     while len(doc_store) > MAX_DOCS_IN_MEMORY:
         doc_store.popitem(last=False)
+
+
+def _resolve_session_id(cookie_value: Optional[str]) -> tuple[str, bool]:
+    candidate = str(cookie_value or "").strip()
+    if re.fullmatch(r"[A-Za-z0-9_-]{20,128}", candidate):
+        return candidate, False
+    return secrets.token_urlsafe(24), True
+
+
+def _get_runtime_settings(session_id: str) -> dict[str, str]:
+    settings = runtime_store.get(session_id)
+    if settings is None:
+        settings = {}
+        runtime_store[session_id] = settings
+    runtime_store.move_to_end(session_id)
+    while len(runtime_store) > MAX_RUNTIME_SESSIONS:
+        runtime_store.popitem(last=False)
+    return settings
+
+
+def _mask_secret(value: str) -> str:
+    secret = str(value or "").strip()
+    if not secret:
+        return ""
+    if len(secret) <= 8:
+        return "*" * len(secret)
+    return f"{secret[:4]}{'*' * (len(secret) - 8)}{secret[-4:]}"
 
 
 # ─── Helpers ───
@@ -1104,10 +1172,36 @@ async def healthz() -> dict:
     return {
         "status": "ok",
         "demo_mode": _is_demo_mode(),
-        "upstage_key_configured": bool(key) and key.lower() not in {"your_api_key_here", "change_me"},
+        "upstage_key_configured": bool(key) and not _is_placeholder_key(key),
         "pdf_converter": converter,
         "max_upload_bytes": MAX_UPLOAD_BYTES,
         "version": app.version,
+    }
+
+
+@app.post("/api/runtime/config")
+async def update_runtime_config(
+    request: Request,
+    upstage_api_key: str = Form(default=""),
+):
+    key = str(upstage_api_key or "").strip()
+    if key and len(key) < 12:
+        raise HTTPException(400, "API 키 형식이 올바르지 않습니다. (최소 12자)")
+
+    settings = _get_runtime_settings(request.state.session_id)
+    if key:
+        settings["upstage_api_key"] = key
+    else:
+        settings.pop("upstage_api_key", None)
+
+    effective_key = key or (os.getenv("UPSTAGE_API_KEY") or "").strip()
+    runtime_configured = bool(key) and not _is_placeholder_key(key)
+    effective_configured = bool(effective_key) and not _is_placeholder_key(effective_key)
+    return {
+        "runtime_key_configured": runtime_configured,
+        "effective_key_configured": effective_configured,
+        "demo_mode": _is_demo_mode(api_key=effective_key),
+        "masked_runtime_key": _mask_secret(key),
     }
 
 

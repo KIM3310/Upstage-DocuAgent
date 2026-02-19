@@ -45,6 +45,50 @@ def test_healthz_smoke() -> None:
     assert "pdf_converter" in data
 
 
+def test_runtime_api_key_config_is_session_scoped(monkeypatch) -> None:
+    monkeypatch.delenv("DOCUAGENT_MODE", raising=False)
+    monkeypatch.delenv("DOCUAGENT_DEMO_MODE", raising=False)
+    monkeypatch.delenv("UPSTAGE_API_KEY", raising=False)
+
+    health = _request("GET", "/healthz")
+    assert health.status_code == 200, health.text
+    session_id = health.cookies.get("docuagent_sid")
+    assert session_id
+    session_headers = {"Cookie": f"docuagent_sid={session_id}"}
+
+    config = _request(
+        "POST",
+        "/api/runtime/config",
+        data={"upstage_api_key": "upstage_test_key_123456"},
+        headers=session_headers,
+    )
+    assert config.status_code == 200, config.text
+    payload = config.json()
+    assert payload["runtime_key_configured"] is True
+    assert payload["demo_mode"] is False
+
+    health_live = _request("GET", "/healthz", headers=session_headers)
+    assert health_live.status_code == 200, health_live.text
+    health_live_payload = health_live.json()
+    assert health_live_payload["upstage_key_configured"] is True
+    assert health_live_payload["demo_mode"] is False
+
+    clear = _request(
+        "POST",
+        "/api/runtime/config",
+        data={"upstage_api_key": ""},
+        headers=session_headers,
+    )
+    assert clear.status_code == 200, clear.text
+    assert clear.json()["runtime_key_configured"] is False
+
+    health_demo = _request("GET", "/healthz", headers=session_headers)
+    assert health_demo.status_code == 200, health_demo.text
+    health_demo_payload = health_demo.json()
+    assert health_demo_payload["upstage_key_configured"] is False
+    assert health_demo_payload["demo_mode"] is True
+
+
 def test_demo_analyze_chat_and_exports(monkeypatch) -> None:
     monkeypatch.setenv("DOCUAGENT_DEMO_MODE", "1")
 

@@ -57,9 +57,14 @@ python main.py
    - 또는 UI에서 샘플 버튼(KO/EN)으로 바로 실행
 2) 학습자 수준/학습 목표 선택
 3) LOM 태그 입력(선택)
-4) 분석 완료 후 결과 확인
-5) Markdown/HTML/PDF/SCORM/IMS로 내보내기
-6) 문서 기반 질의응답
+4) (선택) Runtime API Key 패널에 Upstage API 키 입력
+5) 분석 완료 후 결과 확인
+6) Markdown/HTML/PDF/SCORM/IMS로 내보내기
+7) 문서 기반 질의응답
+
+## 광고(AdSense) 설정
+- 퍼블리셔 클라이언트는 `ca-pub-4973160293737562`로 포함되어 있습니다.
+- 실제 광고 노출을 위해 `Trust & Policy` 영역의 `AdSense 슬롯 ID`에 승인된 슬롯 번호를 입력하세요.
 
 ## 내보내기 형식
 - Markdown: Notion 업로드용

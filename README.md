@@ -36,12 +36,13 @@ UPSTAGE_API_KEY="your_api_key_here" python3 main.py
 Open `http://localhost:8000`
 - Click sample buttons on the UI: `샘플 불러오기 (KO)` / `Sample (EN)`
 - Health check: `http://localhost:8000/healthz`
+- Optional: paste your Upstage key in the UI `Runtime API Key` panel (session-scoped backend config)
 
 ## AdSense + Cloudflare Pages Prep
-- `index.html` includes review-oriented trust/policy blocks and a sponsored slot placeholder.
-- Replace placeholder values before submit:
-  - `ca-pub-0000000000000000` -> your AdSense publisher id
-  - `1234567890` -> approved ad slot id
+- `index.html` includes an AdSense script with publisher client:
+  - `ca-pub-4973160293737562`
+- Add your approved ad unit slot id in the UI:
+  - `Trust & Policy` -> `AdSense 슬롯 ID (숫자)` -> `슬롯 적용`
 - Crawl helpers are ready at repo root:
   - `ads.txt`
   - `robots.txt`
