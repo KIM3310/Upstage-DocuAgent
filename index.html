@@ -271,6 +271,20 @@ body::after {
   border-color:var(--accent);
   box-shadow:0 0 0 3px var(--glow);
 }
+.runtime-row select {
+  min-width:160px;
+  padding:10px 12px;
+  border-radius:8px;
+  border:1px solid var(--border);
+  background:var(--surface2);
+  color:var(--text);
+  font-size:12px;
+  outline:none;
+}
+.runtime-row select:focus {
+  border-color:var(--accent);
+  box-shadow:0 0 0 3px var(--glow);
+}
 .runtime-status {
   margin-top:8px;
   font-size:11px;
@@ -782,8 +796,17 @@ body::after {
           <button type="button" class="ghost-btn" id="saveApiKeyBtn">API 키 적용</button>
           <button type="button" class="ghost-btn" id="clearApiKeyBtn">키 삭제</button>
         </div>
+        <div class="runtime-row" style="margin-top:8px;">
+          <select id="llmProvider">
+            <option value="">LLM Provider: 기본(환경값)</option>
+            <option value="upstage">Upstage Solar</option>
+            <option value="ollama">Ollama</option>
+          </select>
+          <input type="text" id="ollamaBaseUrl" placeholder="Ollama Base URL (예: http://127.0.0.1:11434)">
+          <input type="text" id="ollamaModel" placeholder="Ollama Model (예: llama3.2:latest)">
+        </div>
         <div class="runtime-status" id="apiKeyStatus"></div>
-        <div class="runtime-hint">입력한 키는 현재 서버 세션에만 저장되며 브라우저 저장소(localStorage)에 남기지 않습니다.</div>
+        <div class="runtime-hint">API 키/Provider/Ollama 설정은 현재 서버 세션에만 저장되며 브라우저 localStorage에는 남기지 않습니다.</div>
       </div>
       <div class="session-docs">
         <div class="session-docs-head">
@@ -971,6 +994,9 @@ const communityEndpoint = document.getElementById('communityEndpoint');
 const communitySubmit = document.getElementById('communitySubmit');
 const communityStatus = document.getElementById('communityStatus');
 const upstageApiKeyInput = document.getElementById('upstageApiKey');
+const llmProviderSelect = document.getElementById('llmProvider');
+const ollamaBaseUrlInput = document.getElementById('ollamaBaseUrl');
+const ollamaModelInput = document.getElementById('ollamaModel');
 const saveApiKeyBtn = document.getElementById('saveApiKeyBtn');
 const clearApiKeyBtn = document.getElementById('clearApiKeyBtn');
 const apiKeyStatus = document.getElementById('apiKeyStatus');
@@ -986,6 +1012,8 @@ let currentDocId = null;
 let tagSyncTimer = null;
 let currentRecommendations = [];
 let activeAnalysisJobId = null;
+let currentLlmProvider = 'upstage';
+let currentLlmModel = '';
 
 const COMMUNITY_ENDPOINT_KEY = 'docuagent_formspree_endpoint';
 const ADSENSE_SLOT_STORAGE_KEY = 'docuagent_adsense_slot';
@@ -1115,15 +1143,29 @@ async function applyRuntimeApiKey(rawKey, { silent = false, refreshHealth = true
     return null;
   }
 
+  const provider = String(llmProviderSelect?.value || '').trim();
+  const ollamaBaseUrl = String(ollamaBaseUrlInput?.value || '').trim();
+  const ollamaModel = String(ollamaModelInput?.value || '').trim();
+
   if (saveApiKeyBtn) saveApiKeyBtn.disabled = true;
   if (clearApiKeyBtn) clearApiKeyBtn.disabled = true;
   const formData = new FormData();
   formData.append('upstage_api_key', key);
+  formData.append('llm_provider', provider);
+  formData.append('ollama_base_url', ollamaBaseUrl);
+  formData.append('ollama_model', ollamaModel);
 
   try {
     const data = await apiFetch('/api/runtime/config', { method: 'POST', body: formData });
     if (!silent) {
-      if (data.runtime_key_configured) {
+      const effectiveProvider = String(data.llm_provider || 'upstage').toLowerCase();
+      if (effectiveProvider === 'ollama') {
+        const modelLabel = String(data.ollama_model || '').trim();
+        const baseLabel = String(data.ollama_base_url || '').trim();
+        setApiKeyStatus(
+          `Ollama provider 적용됨${modelLabel ? ` (${modelLabel})` : ''}${baseLabel ? ` · ${baseLabel}` : ''}.`,
+        );
+      } else if (data.runtime_key_configured) {
         setApiKeyStatus(`API 키 적용 완료 (${data.masked_runtime_key || maskKey(key)}) · 현재 세션에만 저장됩니다.`);
       } else if (data.effective_key_configured) {
         setApiKeyStatus('런타임 키는 제거되었고 서버 환경 키가 사용 중입니다.');
@@ -1149,6 +1191,24 @@ async function initializeRuntimeKey() {
   upstageApiKeyInput.value = '';
   try {
     const state = await fetchRuntimeConfig();
+    if (llmProviderSelect) {
+      llmProviderSelect.value = String(state.runtime_provider || '');
+    }
+    if (ollamaBaseUrlInput) {
+      ollamaBaseUrlInput.value = String(state.runtime_ollama_base_url || state.ollama_base_url || '');
+    }
+    if (ollamaModelInput) {
+      ollamaModelInput.value = String(state.runtime_ollama_model || state.ollama_model || '');
+    }
+    currentLlmProvider = String(state.llm_provider || 'upstage').toLowerCase();
+    currentLlmModel = String(state.ollama_model || '').trim();
+
+    if (currentLlmProvider === 'ollama') {
+      setApiKeyStatus(
+        `현재 세션은 Ollama provider${currentLlmModel ? ` (${currentLlmModel})` : ''}로 설정되어 있습니다.`,
+      );
+      return;
+    }
     if (state.runtime_key_configured) {
       setApiKeyStatus(`현재 세션 API 키 적용됨 (${state.masked_runtime_key || ''})`);
     } else if (state.effective_key_configured) {
@@ -1529,15 +1589,27 @@ async function initHealth() {
   try {
     const data = await apiFetch('/healthz');
     const demo = !!data.demo_mode;
+    const provider = String(data.llm_provider || 'upstage').toLowerCase();
+    const model = String(data.llm_model || '').trim();
+    currentLlmProvider = provider || 'upstage';
+    currentLlmModel = model;
     modeTag.textContent = demo ? 'DEMO' : 'LIVE';
     modeTag.dataset.mode = demo ? 'demo' : 'live';
     modeTag.title = demo
       ? 'Demo mode: runs end-to-end without paid keys (no external API calls)'
-      : 'Live mode: Upstage API key detected (runtime/env)';
+      : provider === 'ollama'
+        ? 'Live mode: Ollama provider 활성화'
+        : 'Live mode: Upstage API key detected (runtime/env)';
     if(poweredLine) {
-      poweredLine.textContent = demo
-        ? 'Demo mode · Local parse + deterministic outputs (set API key for live)'
-        : 'Upstage Solar · Document Parse · Information Extract';
+      if (demo) {
+        poweredLine.textContent = 'Demo mode · Local parse + deterministic outputs (set API key for live)';
+      } else if (provider === 'ollama') {
+        poweredLine.textContent = model
+          ? `Ollama (${model}) · Upstage Document Parse · Information Extract`
+          : 'Ollama · Upstage Document Parse · Information Extract';
+      } else {
+        poweredLine.textContent = 'Upstage Solar · Document Parse · Information Extract';
+      }
     }
   } catch {
     modeTag.textContent = '...';

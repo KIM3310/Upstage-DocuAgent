@@ -97,6 +97,30 @@ def test_runtime_api_key_config_is_session_scoped(monkeypatch) -> None:
     assert health_demo_payload["demo_mode"] is True
 
 
+def test_runtime_ollama_provider_config(monkeypatch) -> None:
+    monkeypatch.delenv("DOCUAGENT_MODE", raising=False)
+    monkeypatch.delenv("DOCUAGENT_DEMO_MODE", raising=False)
+    monkeypatch.delenv("UPSTAGE_API_KEY", raising=False)
+
+    session_headers = _new_session_headers()
+    config = _request(
+        "POST",
+        "/api/runtime/config",
+        data={
+            "llm_provider": "ollama",
+            "ollama_base_url": "http://127.0.0.1:11434",
+            "ollama_model": "llama3.2:latest",
+            "upstage_api_key": "",
+        },
+        headers=session_headers,
+    )
+    assert config.status_code == 200, config.text
+    payload = config.json()
+    assert payload["llm_provider"] == "ollama"
+    assert payload["ollama_base_url"] == "http://127.0.0.1:11434"
+    assert payload["ollama_model"] == "llama3.2:latest"
+
+
 def test_demo_analyze_chat_and_exports(monkeypatch) -> None:
     monkeypatch.setenv("DOCUAGENT_DEMO_MODE", "1")
     session_headers = _new_session_headers()

@@ -7,6 +7,7 @@ DocuAgent is a document analysis service that turns an upload into:
 - Summary + document-grounded Q&A
 - Learning content (objectives, quiz, flashcards, activities)
 - LMS-ready exports (SCORM / IMS CC)
+- Optional Ollama provider for text-generation stages (schema/summary/chat/learning pack)
 
 ## My Scope (Personal Project)
 - Built the end-to-end pipeline: document parse -> schema generation -> JSON extraction -> learning pack -> LMS export.
@@ -33,11 +34,20 @@ DOCUAGENT_DEMO_MODE=1 python3 main.py
 UPSTAGE_API_KEY="your_api_key_here" python3 main.py
 ```
 
+4) Optional: Live mode with Ollama provider (Solar-stage replacement)
+```bash
+UPSTAGE_API_KEY="your_api_key_here" \
+DOCUAGENT_LLM_PROVIDER=ollama \
+OLLAMA_BASE_URL="http://127.0.0.1:11434" \
+OLLAMA_MODEL="llama3.2:latest" \
+python3 main.py
+```
+
 Open `http://localhost:8000`
 - Click sample buttons on the UI: `샘플 불러오기 (KO)` / `Sample (EN)`
 - Health check: `http://localhost:8000/healthz`
 - Runtime metrics: `http://localhost:8000/api/metrics`
-- Optional: paste your Upstage key in the UI `Runtime API Key` panel (session-scoped backend config, not persisted in browser storage)
+- Optional: set Upstage key / provider / Ollama config in the UI `Runtime API Key` panel (session-scoped backend config, not persisted in browser storage)
 - Manage previously analyzed docs per session via `세션 문서` panel (reload/delete/clear)
 - Async analysis jobs support polling, cancellation, and concurrency guardrails (`/api/analyze/jobs`, `/api/analyze/jobs/{job_id}/cancel`)
 
@@ -56,7 +66,7 @@ Open `http://localhost:8000`
   - `_headers`
 
 ## Project Structure
-- `main.py`: FastAPI backend + Upstage integrations + export builders
+- `main.py`: FastAPI backend + Upstage/Ollama integrations + export builders
 - `index.html`: frontend UI
 - `assets/`: demo documents + UI assets
 - `requirements.txt`: runtime dependencies

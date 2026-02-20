@@ -13,6 +13,7 @@ DocuAgent는 문서를 업로드하면 구조화, 핵심 정보 추출, 요약, 
 - 내보내기: Markdown, HTML, PDF, SCORM 1.2/2004, IMS CC 1.1/1.3
 - LOM 태그: 사용자 태그와 핵심 개념을 IMS CC 1.3 키워드로 반영
 - 추천 태그: 핵심 개념 기반 추천 태그 클릭 적용
+- 선택 기능: 텍스트 생성 단계(스키마/요약/챗/교육팩)에 Ollama provider 사용 가능
 
 ## 처리 흐름
 1) Document Parse
@@ -45,7 +46,16 @@ export UPSTAGE_API_KEY="your_api_key_here"
 또는 .env 파일 사용
 키를 설정하지 않으면 **데모 모드(스텁 출력)**로 동작하여, 외부 API 없이도 UI 흐름을 끝까지 확인할 수 있습니다.
 
-### 4) 접속
+### 4) 라이브 모드 실행 (Ollama provider 사용)
+```
+export UPSTAGE_API_KEY="your_api_key_here"
+export DOCUAGENT_LLM_PROVIDER="ollama"
+export OLLAMA_BASE_URL="http://127.0.0.1:11434"
+export OLLAMA_MODEL="llama3.2:latest"
+python main.py
+```
+
+### 5) 접속
 ```
 python main.py
 ```
@@ -57,8 +67,8 @@ python main.py
    - 또는 UI에서 샘플 버튼(KO/EN)으로 바로 실행
 2) 학습자 수준/학습 목표 선택
 3) LOM 태그 입력(선택)
-4) (선택) Runtime API Key 패널에 Upstage API 키 입력
-   - 키는 현재 브라우저 세션에만 적용되며 localStorage에 저장하지 않습니다.
+4) (선택) Runtime 패널에서 Upstage 키 / Provider / Ollama 설정 입력
+   - 설정은 현재 브라우저 세션에만 적용되며 localStorage에 저장하지 않습니다.
 5) 분석 완료 후 결과 확인
 6) Markdown/HTML/PDF/SCORM/IMS로 내보내기
 7) 문서 기반 질의응답
@@ -80,7 +90,7 @@ python main.py
 - 추천 태그 클릭으로 빠른 반영 가능
 
 ## 프로젝트 구조
-- main.py: FastAPI 백엔드, Upstage API 연동, 패키지 생성
+- main.py: FastAPI 백엔드, Upstage/Ollama 연동, 패키지 생성
 - index.html: 프론트엔드 UI
 - requirements.txt: 의존성
 - LMS_IMPORT_CHECKLIST.md: LMS 임포트 체크리스트

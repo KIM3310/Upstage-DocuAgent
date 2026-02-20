@@ -13,6 +13,7 @@ DocuAgent parses documents, extracts key data, generates summaries and learning 
 - Export: Markdown, HTML, PDF, SCORM 1.2/2004, IMS CC 1.1/1.3
 - LOM tags: User tags + key concepts mapped to IMS CC 1.3 keywords
 - Recommended tags: One-click application of suggested tags
+- Optional Ollama provider for text-generation stages (schema/summary/chat/learning pack)
 
 ## Pipeline
 1) Document Parse
@@ -45,7 +46,16 @@ export UPSTAGE_API_KEY="your_api_key_here"
 Or use .env
 If you skip the key, DocuAgent runs in **demo mode** (stubbed outputs) so you can still try the UI end-to-end.
 
-### 4) Open UI
+### 4) Optional: Live mode with Ollama provider
+```
+export UPSTAGE_API_KEY="your_api_key_here"
+export DOCUAGENT_LLM_PROVIDER="ollama"
+export OLLAMA_BASE_URL="http://127.0.0.1:11434"
+export OLLAMA_MODEL="llama3.2:latest"
+python main.py
+```
+
+### 5) Open UI
 ```
 python main.py
 ```
@@ -57,8 +67,8 @@ Health check: http://localhost:8000/healthz
    - Or click the sample buttons (KO/EN) on the UI
 2) Select audience level and learning goal
 3) Enter LOM tags (optional)
-4) (Optional) Enter a Runtime API key in the UI
-   - Key is applied to the current browser session only (not persisted in localStorage)
+4) (Optional) Enter Runtime settings in the UI (Upstage key / provider / Ollama)
+   - Runtime settings are applied to the current session only (not persisted in localStorage)
 5) Review results
 6) Export to Markdown/HTML/PDF/SCORM/IMS
 7) Ask questions about the document
@@ -76,7 +86,7 @@ Health check: http://localhost:8000/healthz
 - Recommended tags can be applied with one click
 
 ## Project Structure
-- main.py: FastAPI backend, Upstage integration, package builders
+- main.py: FastAPI backend, Upstage/Ollama integration, package builders
 - index.html: frontend UI
 - requirements.txt: dependencies
 - LMS_IMPORT_CHECKLIST.md: LMS import checklist

@@ -54,6 +54,9 @@ def _load_env(path: str = ".env") -> None:
 _load_env()
 DEFAULT_UPSTAGE_BASE_URL = "https://api.upstage.ai/v1"
 DEFAULT_SOLAR_MODEL = "solar-pro2"
+DEFAULT_LLM_PROVIDER = "upstage"
+DEFAULT_OLLAMA_BASE_URL = "http://127.0.0.1:11434"
+DEFAULT_OLLAMA_MODEL = "llama3.2:latest"
 LOGGER = logging.getLogger("docuagent")
 
 
@@ -182,6 +185,9 @@ MAX_METRICS_PATHS = _read_int_env(
 SESSION_COOKIE_NAME = "docuagent_sid"
 SESSION_COOKIE_MAX_AGE = 60 * 60 * 24 * 30
 REQUEST_UPSTAGE_API_KEY: ContextVar[str] = ContextVar("request_upstage_api_key", default="")
+REQUEST_LLM_PROVIDER: ContextVar[str] = ContextVar("request_llm_provider", default="")
+REQUEST_OLLAMA_BASE_URL: ContextVar[str] = ContextVar("request_ollama_base_url", default="")
+REQUEST_OLLAMA_MODEL: ContextVar[str] = ContextVar("request_ollama_model", default="")
 ALLOWED_UPLOAD_EXTENSIONS = {
     ext.lower()
     for ext in _read_csv_env(
@@ -264,6 +270,76 @@ def _get_solar_model() -> str:
     return (os.getenv("UPSTAGE_SOLAR_MODEL") or DEFAULT_SOLAR_MODEL).strip()
 
 
+def _normalize_llm_provider(value: str) -> str:
+    raw = str(value or "").strip().lower()
+    if raw in {"upstage", "ollama"}:
+        return raw
+    return DEFAULT_LLM_PROVIDER
+
+
+def _normalize_ollama_base_url(value: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if not re.match(r"^https?://", text, flags=re.IGNORECASE):
+        text = f"http://{text}"
+    return text.rstrip("/")
+
+
+def _normalize_ollama_model(value: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    return text
+
+
+def _effective_runtime_settings(settings: dict[str, str]) -> dict[str, str]:
+    runtime_provider_raw = str(settings.get("llm_provider") or "").strip()
+    runtime_provider = _normalize_llm_provider(runtime_provider_raw) if runtime_provider_raw else ""
+    env_provider = _normalize_llm_provider(os.getenv("DOCUAGENT_LLM_PROVIDER") or DEFAULT_LLM_PROVIDER)
+    effective_provider = runtime_provider or env_provider
+
+    runtime_ollama_base = _normalize_ollama_base_url(settings.get("ollama_base_url") or "")
+    env_ollama_base = _normalize_ollama_base_url(os.getenv("OLLAMA_BASE_URL") or "")
+    effective_ollama_base = runtime_ollama_base or env_ollama_base or DEFAULT_OLLAMA_BASE_URL
+
+    runtime_ollama_model = _normalize_ollama_model(settings.get("ollama_model") or "")
+    env_ollama_model = _normalize_ollama_model(os.getenv("OLLAMA_MODEL") or "")
+    effective_ollama_model = runtime_ollama_model or env_ollama_model or DEFAULT_OLLAMA_MODEL
+
+    return {
+        "runtime_provider": runtime_provider,
+        "effective_provider": effective_provider,
+        "runtime_ollama_base_url": runtime_ollama_base,
+        "effective_ollama_base_url": effective_ollama_base,
+        "runtime_ollama_model": runtime_ollama_model,
+        "effective_ollama_model": effective_ollama_model,
+    }
+
+
+def _get_llm_provider() -> str:
+    runtime_provider = str(REQUEST_LLM_PROVIDER.get() or "").strip()
+    if runtime_provider:
+        return _normalize_llm_provider(runtime_provider)
+    return _normalize_llm_provider(os.getenv("DOCUAGENT_LLM_PROVIDER") or DEFAULT_LLM_PROVIDER)
+
+
+def _get_ollama_base_url() -> str:
+    runtime_base = _normalize_ollama_base_url(REQUEST_OLLAMA_BASE_URL.get() or "")
+    if runtime_base:
+        return runtime_base
+    env_base = _normalize_ollama_base_url(os.getenv("OLLAMA_BASE_URL") or "")
+    return env_base or DEFAULT_OLLAMA_BASE_URL
+
+
+def _get_ollama_model() -> str:
+    runtime_model = _normalize_ollama_model(REQUEST_OLLAMA_MODEL.get() or "")
+    if runtime_model:
+        return runtime_model
+    env_model = _normalize_ollama_model(os.getenv("OLLAMA_MODEL") or "")
+    return env_model or DEFAULT_OLLAMA_MODEL
+
+
 def _is_demo_mode(api_key: Optional[str] = None) -> bool:
     # Force demo mode for reviewers: no paid keys required.
     if (os.getenv("DOCUAGENT_MODE") or "").strip().lower() in {"demo", "stub"}:
@@ -318,8 +394,15 @@ async def request_context_middleware(request: Request, call_next):
     request_id = request.headers.get("x-request-id") or f"req-{uuid.uuid4().hex[:12]}"
     session_id, is_new_session = _resolve_session_id(request.cookies.get(SESSION_COOKIE_NAME))
     runtime_settings = _get_runtime_settings(session_id)
+    runtime_llm = _effective_runtime_settings(runtime_settings)
     runtime_key = str(runtime_settings.get("upstage_api_key") or "").strip()
+    runtime_provider = str(runtime_llm.get("runtime_provider") or "").strip()
+    runtime_ollama_base_url = str(runtime_llm.get("runtime_ollama_base_url") or "").strip()
+    runtime_ollama_model = str(runtime_llm.get("runtime_ollama_model") or "").strip()
     key_token = REQUEST_UPSTAGE_API_KEY.set(runtime_key)
+    provider_token = REQUEST_LLM_PROVIDER.set(runtime_provider)
+    ollama_base_token = REQUEST_OLLAMA_BASE_URL.set(runtime_ollama_base_url)
+    ollama_model_token = REQUEST_OLLAMA_MODEL.set(runtime_ollama_model)
     request.state.request_id = request_id
     request.state.session_id = session_id
     request.state.runtime_settings = runtime_settings
@@ -329,6 +412,9 @@ async def request_context_middleware(request: Request, call_next):
         response = await call_next(request)
     finally:
         REQUEST_UPSTAGE_API_KEY.reset(key_token)
+        REQUEST_LLM_PROVIDER.reset(provider_token)
+        REQUEST_OLLAMA_BASE_URL.reset(ollama_base_token)
+        REQUEST_OLLAMA_MODEL.reset(ollama_model_token)
         elapsed_ms = int((time.perf_counter() - started) * 1000)
         route = request.scope.get("route")
         route_path = getattr(route, "path", request.url.path)
@@ -1124,6 +1210,102 @@ def _pdf_to_png_bytes(file_bytes: bytes) -> bytes:
     return _pdf_to_png_images(file_bytes, max_pages=1)[0]
 
 
+def _normalize_chat_messages(messages: list[dict[str, Any]]) -> list[dict[str, str]]:
+    normalized: list[dict[str, str]] = []
+    for item in messages:
+        if not isinstance(item, dict):
+            continue
+        role = str(item.get("role") or "user").strip().lower()
+        if role not in {"system", "user", "assistant"}:
+            role = "user"
+        content = str(item.get("content") or "").strip()
+        if not content:
+            continue
+        normalized.append({"role": role, "content": content})
+    return normalized
+
+
+def _call_upstage_chat(messages: list[dict[str, Any]], *, max_tokens: int, temperature: float) -> str:
+    client = _get_upstage_client()
+    model = _get_solar_model()
+    safe_messages = _normalize_chat_messages(messages)
+    if not safe_messages:
+        raise HTTPException(400, "LLM 메시지가 비어 있습니다.")
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            messages=safe_messages,
+            max_tokens=max_tokens,
+            temperature=temperature,
+        )
+    except Exception as e:
+        raise HTTPException(502, f"Solar 호출 실패: {_safe_error_text(e)}")
+
+    try:
+        content = str(response.choices[0].message.content or "").strip()
+    except Exception:
+        content = ""
+    if not content:
+        raise HTTPException(502, "Solar 응답이 비어 있습니다.")
+    return content
+
+
+def _call_ollama_chat(messages: list[dict[str, Any]], *, max_tokens: int, temperature: float) -> str:
+    base_url = _get_ollama_base_url()
+    model = _get_ollama_model()
+    safe_messages = _normalize_chat_messages(messages)
+    if not safe_messages:
+        raise HTTPException(400, "LLM 메시지가 비어 있습니다.")
+
+    payload = {
+        "model": model,
+        "messages": safe_messages,
+        "stream": False,
+        "options": {
+            "temperature": float(temperature),
+            "num_predict": int(max(32, min(int(max_tokens), 4096))),
+        },
+    }
+    try:
+        resp = HTTP_SESSION.post(
+            f"{base_url}/api/chat",
+            json=payload,
+            timeout=UPSTREAM_TIMEOUT_SEC,
+        )
+    except requests.RequestException as e:
+        raise HTTPException(502, f"Ollama 호출 실패: {_safe_error_text(e)}")
+
+    body_text = _safe_error_text(resp.text)
+    data: dict[str, Any] = {}
+    try:
+        parsed = resp.json()
+        if isinstance(parsed, dict):
+            data = parsed
+    except ValueError:
+        data = {}
+
+    if resp.status_code >= 400:
+        detail = str(data.get("error") or data.get("message") or body_text or "").strip()
+        raise HTTPException(502, f"Ollama 호출 실패({resp.status_code}): {detail or 'unknown error'}")
+
+    content = ""
+    message_obj = data.get("message")
+    if isinstance(message_obj, dict):
+        content = str(message_obj.get("content") or "").strip()
+    if not content:
+        content = str(data.get("response") or "").strip()
+    if not content:
+        raise HTTPException(502, "Ollama 응답이 비어 있습니다.")
+    return content
+
+
+def _call_llm_chat(messages: list[dict[str, Any]], *, max_tokens: int, temperature: float) -> str:
+    provider = _get_llm_provider()
+    if provider == "ollama":
+        return _call_ollama_chat(messages, max_tokens=max_tokens, temperature=temperature)
+    return _call_upstage_chat(messages, max_tokens=max_tokens, temperature=temperature)
+
+
 def call_solar_chat(system_prompt: str, user_message: str, history: list = None) -> str:
     """Solar — 문서 기반 Q&A"""
     if _is_demo_mode():
@@ -1132,27 +1314,14 @@ def call_solar_chat(system_prompt: str, user_message: str, history: list = None)
             "Configure UPSTAGE_API_KEY to enable real generation."
         )
 
-    client = _get_upstage_client()
-    model = _get_solar_model()
-
     messages = [{"role": "system", "content": system_prompt}]
     
     if history:
         messages.extend(history)
     
     messages.append({"role": "user", "content": user_message})
-    
-    try:
-        response = client.chat.completions.create(
-            model=model,
-            messages=messages,
-            max_tokens=1500,
-            temperature=0.3,
-        )
-    except Exception as e:
-        raise HTTPException(502, f"Solar 호출 실패: {_safe_error_text(e)}")
-    
-    return response.choices[0].message.content
+
+    return _call_llm_chat(messages, max_tokens=1500, temperature=0.3)
 
 
 def auto_detect_schema(parsed_markdown: str) -> dict:
@@ -1171,9 +1340,6 @@ def auto_detect_schema(parsed_markdown: str) -> dict:
             },
         }
 
-    client = _get_upstage_client()
-    model = _get_solar_model()
-    
     prompt = """당신은 문서 분석 전문가입니다. 아래 문서 내용을 보고, 이 문서에서 추출해야 할 핵심 필드를 JSON Schema 형태로 생성하세요.
 
 규칙:
@@ -1194,21 +1360,17 @@ def auto_detect_schema(parsed_markdown: str) -> dict:
 """ + parsed_markdown[:2000]
     
     try:
-        response = client.chat.completions.create(
-            model=model,
-            messages=[{"role": "user", "content": prompt}],
+        content = _call_llm_chat(
+            [{"role": "user", "content": prompt}],
             max_tokens=800,
             temperature=0,
-        )
-    except Exception:
-        # 폴백 스키마는 아래에서 반환
-        response = None
-    
-    if response is not None:
-        content = response.choices[0].message.content.strip()
+        ).strip()
         parsed = _extract_json(content)
         if parsed:
             return parsed
+    except Exception:
+        # 폴백 스키마는 아래에서 반환
+        pass
 
     # 폴백 스키마
     return {
@@ -1286,9 +1448,6 @@ def generate_edu_pack(
             ],
         }
 
-    client = _get_upstage_client()
-    model = _get_solar_model()
-
     prompt = f"""당신은 교육 콘텐츠 설계 전문가입니다. 아래 문서 내용과 추출 정보를 바탕으로 교육용 패키지를 JSON으로만 출력하세요.
 
 학습자 수준: {audience}
@@ -1317,13 +1476,11 @@ def generate_edu_pack(
 """
 
     try:
-        response = client.chat.completions.create(
-            model=model,
-            messages=[{"role": "user", "content": prompt}],
+        content = _call_llm_chat(
+            [{"role": "user", "content": prompt}],
             max_tokens=1000,
             temperature=0.2,
-        )
-        content = response.choices[0].message.content.strip()
+        ).strip()
         parsed = _extract_json(content)
         if parsed:
             return parsed
@@ -2040,6 +2197,7 @@ async def _execute_analysis_job(
 
 def _runtime_config_payload(session_id: str) -> dict[str, Any]:
     settings = _get_runtime_settings(session_id)
+    llm_settings = _effective_runtime_settings(settings)
     runtime_key = str(settings.get("upstage_api_key") or "").strip()
     env_key = (os.getenv("UPSTAGE_API_KEY") or "").strip()
     effective_key = runtime_key or env_key
@@ -2050,12 +2208,20 @@ def _runtime_config_payload(session_id: str) -> dict[str, Any]:
         "effective_key_configured": effective_configured,
         "demo_mode": _is_demo_mode(api_key=effective_key),
         "masked_runtime_key": _mask_secret(runtime_key),
+        "runtime_provider": llm_settings["runtime_provider"] or "",
+        "llm_provider": llm_settings["effective_provider"],
+        "runtime_ollama_base_url": llm_settings["runtime_ollama_base_url"] or "",
+        "ollama_base_url": llm_settings["effective_ollama_base_url"],
+        "runtime_ollama_model": llm_settings["runtime_ollama_model"] or "",
+        "ollama_model": llm_settings["effective_ollama_model"],
     }
 
 @app.get("/healthz")
 async def healthz() -> dict:
     converter = "pdftoppm" if shutil.which("pdftoppm") else "pypdfium2"
     key = _get_upstage_api_key()
+    llm_provider = _get_llm_provider()
+    llm_model = _get_ollama_model() if llm_provider == "ollama" else _get_solar_model()
     _prune_doc_store()
     _prune_analysis_jobs()
     with doc_store_lock:
@@ -2070,6 +2236,8 @@ async def healthz() -> dict:
         "status": "ok",
         "demo_mode": _is_demo_mode(),
         "upstage_key_configured": bool(key) and not _is_placeholder_key(key),
+        "llm_provider": llm_provider,
+        "llm_model": llm_model,
         "pdf_converter": converter,
         "max_upload_bytes": MAX_UPLOAD_BYTES,
         "in_memory": {
@@ -2121,17 +2289,47 @@ async def read_runtime_config(request: Request):
 async def update_runtime_config(
     request: Request,
     upstage_api_key: str = Form(default=""),
+    llm_provider: str = Form(default=""),
+    ollama_base_url: str = Form(default=""),
+    ollama_model: str = Form(default=""),
 ):
     _enforce_rate_limit(request.state.session_id, "runtime", RATE_LIMIT_RUNTIME_MAX)
     key = str(upstage_api_key or "").strip()
     if key and len(key) < 12:
         raise HTTPException(400, "API 키 형식이 올바르지 않습니다. (최소 12자)")
 
+    provider_raw = str(llm_provider or "").strip().lower()
+    if provider_raw and provider_raw not in {"upstage", "ollama"}:
+        raise HTTPException(400, "llm_provider는 upstage 또는 ollama만 지원합니다.")
+    normalized_provider = _normalize_llm_provider(provider_raw) if provider_raw else ""
+
+    normalized_ollama_base_url = _normalize_ollama_base_url(ollama_base_url)
+    normalized_ollama_model = _normalize_ollama_model(ollama_model)
+    if ollama_base_url and not normalized_ollama_base_url:
+        raise HTTPException(400, "Ollama Base URL 형식이 올바르지 않습니다.")
+    if normalized_ollama_model and len(normalized_ollama_model) < 2:
+        raise HTTPException(400, "Ollama 모델명이 너무 짧습니다.")
+
     settings = _get_runtime_settings(request.state.session_id)
     if key:
         settings["upstage_api_key"] = key
     else:
         settings.pop("upstage_api_key", None)
+
+    if normalized_provider:
+        settings["llm_provider"] = normalized_provider
+    else:
+        settings.pop("llm_provider", None)
+
+    if normalized_ollama_base_url:
+        settings["ollama_base_url"] = normalized_ollama_base_url
+    else:
+        settings.pop("ollama_base_url", None)
+
+    if normalized_ollama_model:
+        settings["ollama_model"] = normalized_ollama_model
+    else:
+        settings.pop("ollama_model", None)
 
     return _runtime_config_payload(request.state.session_id)
 
