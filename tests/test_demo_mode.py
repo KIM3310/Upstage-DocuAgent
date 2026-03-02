@@ -121,6 +121,33 @@ def test_runtime_ollama_provider_config(monkeypatch) -> None:
     assert payload["ollama_model"] == "llama3.2:latest"
 
 
+def test_runtime_ollama_base_url_rejects_malformed_values(monkeypatch) -> None:
+    monkeypatch.delenv("DOCUAGENT_MODE", raising=False)
+    monkeypatch.delenv("DOCUAGENT_DEMO_MODE", raising=False)
+    monkeypatch.delenv("UPSTAGE_API_KEY", raising=False)
+
+    headers = _new_session_headers()
+    invalid_values = ["http://", "https://", "http:/bad", "://missing", "ftp://127.0.0.1:11434"]
+    for value in invalid_values:
+        res = _request(
+            "POST",
+            "/api/runtime/config",
+            data={"ollama_base_url": value},
+            headers=headers,
+        )
+        assert res.status_code == 400, (value, res.text)
+        assert "Ollama Base URL 형식이 올바르지 않습니다." in res.json().get("detail", "")
+
+    valid = _request(
+        "POST",
+        "/api/runtime/config",
+        data={"ollama_base_url": "127.0.0.1:11434"},
+        headers=headers,
+    )
+    assert valid.status_code == 200, valid.text
+    assert valid.json()["runtime_ollama_base_url"] == "http://127.0.0.1:11434"
+
+
 def test_demo_analyze_chat_and_exports(monkeypatch) -> None:
     monkeypatch.setenv("DOCUAGENT_DEMO_MODE", "1")
     session_headers = _new_session_headers()
@@ -280,6 +307,9 @@ def test_runtime_rate_limit(monkeypatch) -> None:
 
     second = _request("GET", "/api/runtime/config", headers=headers)
     assert second.status_code == 429
+    retry_after = second.headers.get("retry-after")
+    assert retry_after is not None
+    assert int(retry_after) >= 1
 
 
 def test_upload_extension_validation(monkeypatch) -> None:

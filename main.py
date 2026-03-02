@@ -33,6 +33,7 @@ from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from requests.adapters import HTTPAdapter
+from urllib.parse import urlparse
 from urllib3.util.retry import Retry
 
 def _load_env(path: str = ".env") -> None:
@@ -293,9 +294,35 @@ def _normalize_ollama_base_url(value: str) -> str:
     text = str(value or "").strip()
     if not text:
         return ""
-    if not re.match(r"^https?://", text, flags=re.IGNORECASE):
+    has_scheme_delimiter = "://" in text
+    parsed_raw = urlparse(text)
+    if parsed_raw.scheme and parsed_raw.scheme.lower() not in {"http", "https"} and has_scheme_delimiter:
+        return ""
+    if not has_scheme_delimiter and re.match(r"^https?:", text, flags=re.IGNORECASE):
+        return ""
+    if not has_scheme_delimiter:
         text = f"http://{text}"
-    return text.rstrip("/")
+
+    parsed = urlparse(text)
+    if parsed.scheme.lower() not in {"http", "https"}:
+        return ""
+    if parsed.username or parsed.password:
+        return ""
+
+    try:
+        host = parsed.hostname or ""
+        _ = parsed.port  # force port validation
+    except ValueError:
+        return ""
+
+    if not host:
+        return ""
+
+    normalized = f"{parsed.scheme.lower()}://{parsed.netloc}"
+    path = parsed.path.rstrip("/")
+    if path and path != "/":
+        normalized = f"{normalized}{path}"
+    return normalized
 
 
 def _normalize_ollama_model(value: str) -> str:
@@ -460,10 +487,18 @@ async def request_context_middleware(request: Request, call_next):
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
     request_id = getattr(request.state, "request_id", f"req-{uuid.uuid4().hex[:12]}")
+    headers = {"x-request-id": request_id, "cache-control": "no-store"}
+    if isinstance(exc.headers, dict):
+        for key, value in exc.headers.items():
+            if value is None:
+                continue
+            headers[str(key)] = str(value)
+    headers["x-request-id"] = request_id
+    headers["cache-control"] = "no-store"
     return JSONResponse(
         status_code=exc.status_code,
         content={"detail": exc.detail, "request_id": request_id},
-        headers={"x-request-id": request_id, "cache-control": "no-store"},
+        headers=headers,
     )
 
 
@@ -740,6 +775,7 @@ def _enforce_rate_limit(session_id: str, action: str, limit: int) -> None:
             raise HTTPException(
                 429,
                 f"요청이 너무 많습니다. 잠시 후 다시 시도해주세요. (retry_after={retry_after}s)",
+                headers={"Retry-After": str(retry_after)},
             )
         hits.append(now)
         bucket[action] = hits
