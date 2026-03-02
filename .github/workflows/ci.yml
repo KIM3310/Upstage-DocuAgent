@@ -36,5 +36,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install ripgrep
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ripgrep
+
       - name: AdSense/Cloudflare review gate
         run: bash tools/release_ops.sh check

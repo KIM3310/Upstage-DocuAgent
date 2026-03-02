@@ -10,7 +10,7 @@ import httpx
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-import main as appmod
+import main as appmod  # noqa: E402
 
 
 def _make_png_bytes() -> bytes:
