@@ -37,6 +37,83 @@ class TestSmoke(unittest.TestCase):
             else:
                 os.environ["DOCUAGENT_MAX_DOCS"] = old
 
+    def test_extract_response_content_supports_string_and_multipart_shapes(self):
+        import main
+
+        plain = {"choices": [{"message": {"content": '{"a": 1}'}}]}
+        self.assertEqual(main._extract_response_content(plain), '{"a": 1}')
+
+        multipart = {
+            "choices": [
+                {
+                    "message": {
+                        "content": [
+                            {"type": "output_text", "text": '{"b": 2,'},
+                            {"type": "output_text", "text": '"c": 3}'},
+                        ]
+                    }
+                }
+            ]
+        }
+        self.assertEqual(main._extract_response_content(multipart), '{"b": 2,\n"c": 3}')
+
+    def test_call_document_parse_handles_string_content_response(self):
+        import main
+        from unittest.mock import patch
+
+        class FakeResponse:
+            status_code = 200
+            text = "ok"
+
+            @staticmethod
+            def json():
+                return {
+                    "content": "# markdown payload",
+                    "elements": "invalid-shape",
+                    "usage": {"pages": "2"},
+                }
+
+        with patch.object(main, "_is_demo_mode", return_value=False), patch.object(
+            main, "_get_upstage_api_key", return_value="test-key"
+        ), patch.object(main.HTTP_SESSION, "post", return_value=FakeResponse()):
+            parsed = main.call_document_parse(b"dummy", "sample.pdf")
+
+        self.assertEqual(parsed["markdown"], "# markdown payload")
+        self.assertEqual(parsed["elements"], [])
+        self.assertEqual(parsed["pages"], 2)
+
+    def test_information_extract_parses_multipart_content_with_json_repair(self):
+        import main
+        from unittest.mock import patch
+
+        class FakeResponse:
+            status_code = 200
+            text = "ok"
+
+            @staticmethod
+            def json():
+                return {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": [
+                                    {"type": "output_text", "text": '{ "title": "Doc", }'},
+                                ]
+                            }
+                        }
+                    ]
+                }
+
+        schema = {"type": "object", "properties": {"title": {"type": "string"}}}
+        with patch.object(main, "_is_demo_mode", return_value=False), patch.object(
+            main, "_get_upstage_api_key", return_value="test-key"
+        ), patch.object(main.HTTP_SESSION, "post", return_value=FakeResponse()), patch.object(
+            main, "_image_to_png_bytes", return_value=b"png"
+        ):
+            extracted = main.call_information_extract(b"img", "sample.png", schema)
+
+        self.assertEqual(extracted, {"title": "Doc"})
+
     def test_demo_mode_does_not_call_network(self):
         import os
         import importlib

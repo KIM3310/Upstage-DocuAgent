@@ -222,6 +222,18 @@ UPSTREAM_TIMEOUT_SEC = _read_int_env(
     minimum=5,
     maximum=300,
 )
+UPSTREAM_CONNECT_TIMEOUT_SEC = _read_int_env(
+    "DOCUAGENT_UPSTREAM_CONNECT_TIMEOUT_SEC",
+    min(10, UPSTREAM_TIMEOUT_SEC),
+    minimum=1,
+    maximum=120,
+)
+UPSTREAM_READ_TIMEOUT_SEC = _read_int_env(
+    "DOCUAGENT_UPSTREAM_READ_TIMEOUT_SEC",
+    UPSTREAM_TIMEOUT_SEC,
+    minimum=5,
+    maximum=600,
+)
 UPSTREAM_RETRY_TOTAL = _read_int_env(
     "DOCUAGENT_UPSTREAM_RETRY_TOTAL",
     2,
@@ -974,6 +986,55 @@ def _extract_json(content: str) -> Optional[dict]:
     return try_load(repaired)
 
 
+def _extract_response_content(payload: dict) -> str:
+    """Extract model content text from OpenAI-compatible payload variants."""
+    choices = payload.get("choices")
+    if not isinstance(choices, list) or not choices:
+        return ""
+
+    first = choices[0]
+    if not isinstance(first, dict):
+        return ""
+
+    message = first.get("message")
+    if not isinstance(message, dict):
+        return ""
+
+    content = message.get("content")
+    if isinstance(content, str):
+        return content
+
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+                continue
+            if not isinstance(item, dict):
+                continue
+            text = item.get("text")
+            if isinstance(text, str):
+                parts.append(text)
+                continue
+            if item.get("type") == "output_text":
+                value = item.get("content")
+                if isinstance(value, str):
+                    parts.append(value)
+        return "\n".join(part.strip() for part in parts if part and part.strip())
+
+    if content is None:
+        return ""
+
+    try:
+        return json.dumps(content, ensure_ascii=False)
+    except Exception:
+        return str(content)
+
+
+def _upstream_timeout() -> tuple[int, int]:
+    return (UPSTREAM_CONNECT_TIMEOUT_SEC, UPSTREAM_READ_TIMEOUT_SEC)
+
+
 # ─── Upstage API Wrappers ───
 
 def call_document_parse(file_bytes: bytes, filename: str) -> dict:
@@ -1002,7 +1063,7 @@ def call_document_parse(file_bytes: bytes, filename: str) -> dict:
             headers=headers,
             files=files,
             data=data,
-            timeout=UPSTREAM_TIMEOUT_SEC,
+            timeout=_upstream_timeout(),
         )
     except requests.RequestException as e:
         raise HTTPException(502, f"Document Parse 요청 실패: {e}")
@@ -1017,10 +1078,29 @@ def call_document_parse(file_bytes: bytes, filename: str) -> dict:
     except Exception:
         raise HTTPException(502, "Document Parse 응답이 JSON 형식이 아닙니다.")
 
+    content = result.get("content")
+    if isinstance(content, dict):
+        markdown = str(content.get("markdown") or "")
+    elif isinstance(content, str):
+        markdown = content
+    else:
+        markdown = ""
+
+    elements = result.get("elements")
+    if not isinstance(elements, list):
+        elements = []
+
+    usage = result.get("usage")
+    pages_value = usage.get("pages") if isinstance(usage, dict) else 0
+    try:
+        pages = int(float(str(pages_value).strip()))
+    except (TypeError, ValueError):
+        pages = 0
+
     return {
-        "markdown": result.get("content", {}).get("markdown", ""),
-        "elements": result.get("elements", []),
-        "pages": result.get("usage", {}).get("pages", 0),
+        "markdown": markdown,
+        "elements": elements,
+        "pages": max(0, pages),
     }
 
 
@@ -1083,7 +1163,7 @@ def call_information_extract(file_bytes: bytes, filename: str, schema: dict) -> 
             f"{_get_upstage_base_url()}/information-extraction",
             headers=headers,
             json=ie_payload,
-            timeout=UPSTREAM_TIMEOUT_SEC,
+            timeout=_upstream_timeout(),
         )
     except requests.RequestException as e:
         raise HTTPException(502, f"Information Extract 요청 실패: {e}")
@@ -1096,10 +1176,17 @@ def call_information_extract(file_bytes: bytes, filename: str, schema: dict) -> 
 
     try:
         result = resp.json()
-        content = result["choices"][0]["message"]["content"]
     except Exception:
-        raise HTTPException(502, "Information Extract 응답 파싱 실패 (choices/message/content).")
-    
+        raise HTTPException(502, "Information Extract 응답이 JSON 형식이 아닙니다.")
+
+    content = _extract_response_content(result)
+    if not content.strip():
+        raise HTTPException(502, "Information Extract 응답에서 content를 찾을 수 없습니다.")
+
+    parsed = _extract_json(content)
+    if parsed is not None:
+        return parsed
+
     try:
         return json.loads(content)
     except json.JSONDecodeError:
@@ -1270,7 +1357,7 @@ def _call_ollama_chat(messages: list[dict[str, Any]], *, max_tokens: int, temper
         resp = HTTP_SESSION.post(
             f"{base_url}/api/chat",
             json=payload,
-            timeout=UPSTREAM_TIMEOUT_SEC,
+            timeout=_upstream_timeout(),
         )
     except requests.RequestException as e:
         raise HTTPException(502, f"Ollama 호출 실패: {_safe_error_text(e)}")
