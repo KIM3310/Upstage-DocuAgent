@@ -17,3 +17,6 @@ __pycache__/
 *.log
 *.tmp
 
+
+# Debug artifacts
+.venv_*/
