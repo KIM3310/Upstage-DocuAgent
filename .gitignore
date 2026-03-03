@@ -20,3 +20,4 @@ __pycache__/
 
 # Debug artifacts
 .venv_*/
+.codex_runs/
