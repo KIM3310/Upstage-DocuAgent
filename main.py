@@ -2319,6 +2319,13 @@ async def healthz() -> dict:
         job_count = len(analysis_job_store)
         active_job_count = _count_active_analysis_jobs_locked()
     metric_summary = _metrics_snapshot()
+    queue_pressure = active_job_count / MAX_ACTIVE_ANALYSIS_JOBS if MAX_ACTIVE_ANALYSIS_JOBS else 0.0
+    if queue_pressure >= 1.0:
+        pressure_label = "saturated"
+    elif queue_pressure >= 0.5:
+        pressure_label = "elevated"
+    else:
+        pressure_label = "stable"
     return {
         "status": "ok",
         "service": "docuagent",
@@ -2356,6 +2363,16 @@ async def healthz() -> dict:
             "errors_4xx": metric_summary["totals"]["errors_4xx"],
             "errors_5xx": metric_summary["totals"]["errors_5xx"],
             "uptime_sec": metric_summary["uptime_sec"],
+        },
+        "diagnostics": {
+            "runtime_mode": "demo" if _is_demo_mode() else "live",
+            "queue_pressure": pressure_label,
+            "active_job_ratio": round(queue_pressure, 3),
+            "next_action": (
+                "configure runtime API key or switch to demo mode"
+                if not (bool(key) and not _is_placeholder_key(key)) and not _is_demo_mode()
+                else "runtime healthy"
+            ),
         },
         "capabilities": [
             "document-parse",
