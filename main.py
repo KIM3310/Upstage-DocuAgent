@@ -2374,6 +2374,11 @@ async def healthz() -> dict:
                 else "runtime healthy"
             ),
         },
+        "ops_contract": {
+            "schema": "ops-envelope-v1",
+            "version": 1,
+            "required_fields": ["service", "status", "diagnostics.next_action"],
+        },
         "capabilities": [
             "document-parse",
             "runtime-llm-switching",

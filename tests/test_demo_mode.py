@@ -60,6 +60,7 @@ def test_healthz_smoke() -> None:
     assert "job-based-analysis" in data["capabilities"]
     assert data["diagnostics"]["runtime_mode"] in {"demo", "live"}
     assert "next_action" in data["diagnostics"]
+    assert data["ops_contract"]["schema"] == "ops-envelope-v1"
 
 
 def test_runtime_api_key_config_is_session_scoped(monkeypatch) -> None:
