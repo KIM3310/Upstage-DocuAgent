@@ -2321,6 +2321,7 @@ async def healthz() -> dict:
     metric_summary = _metrics_snapshot()
     return {
         "status": "ok",
+        "service": "docuagent",
         "demo_mode": _is_demo_mode(),
         "upstage_key_configured": bool(key) and not _is_placeholder_key(key),
         "llm_provider": llm_provider,
@@ -2355,6 +2356,18 @@ async def healthz() -> dict:
             "errors_4xx": metric_summary["totals"]["errors_4xx"],
             "errors_5xx": metric_summary["totals"]["errors_5xx"],
             "uptime_sec": metric_summary["uptime_sec"],
+        },
+        "capabilities": [
+            "document-parse",
+            "runtime-llm-switching",
+            "job-based-analysis",
+            "lms-export",
+        ],
+        "links": {
+            "runtime_config": "/api/runtime/config",
+            "metrics": "/api/metrics",
+            "docs": "/api/docs",
+            "chat": "/api/chat",
         },
         "version": app.version,
     }

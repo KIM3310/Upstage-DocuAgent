@@ -50,11 +50,14 @@ def test_healthz_smoke() -> None:
     assert r.status_code == 200
     data = r.json()
     assert data["status"] == "ok"
+    assert data["service"] == "docuagent"
     assert "demo_mode" in data
     assert "pdf_converter" in data
     assert "analysis_limits" in data
     assert "retention" in data
     assert "metrics" in data
+    assert data["links"]["runtime_config"] == "/api/runtime/config"
+    assert "job-based-analysis" in data["capabilities"]
 
 
 def test_runtime_api_key_config_is_session_scoped(monkeypatch) -> None:
