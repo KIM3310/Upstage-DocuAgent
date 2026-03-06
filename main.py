@@ -1829,7 +1829,7 @@ def _export_html(doc: dict) -> str:
     pages = html.escape(str(doc.get("pages", "-")))
     tags = ", ".join(doc.get("tags", []) or [])
     tags = html.escape(tags) if tags else "-"
-    generated = html.escape(datetime.datetime.utcnow().isoformat())
+    generated = html.escape(datetime.datetime.now(datetime.UTC).isoformat())
     parsed = html.escape(doc.get("parsed_markdown", "-"))
     edu = doc.get("edu_pack", {}) or {}
 
